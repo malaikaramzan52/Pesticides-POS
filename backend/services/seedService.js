@@ -5,10 +5,10 @@ const Customer        = require('../models/Customer');
 const ExpenseCategory = require('../models/ExpenseCategory');
 const Category        = require('../models/Category');
 const StoreSettings   = require('../models/StoreSettings');
+const Company         = require('../models/Company');
+const Product         = require('../models/Product');
+const WarehouseStock  = require('../models/WarehouseStock');
 const bcrypt          = require('bcryptjs');
-
-// Note: Brand requires company_id (ObjectId ref) so we skip auto-seeding brands.
-// Brands are created by the user through the UI after adding Companies.
 
 const seedDefaultData = async () => {
   try {
@@ -146,6 +146,64 @@ const seedDefaultData = async () => {
       console.log('[Seed] ✓ Store Settings created');
     } else {
       console.log('[Seed] Store Settings already exist');
+    }
+
+    // ── 8. Default Company (Required for Products) ────────────────────────────
+    let company = await Company.findOne({});
+    if (!company) {
+      company = await Company.create({
+        code: 'COMP-GEN',
+        name: 'General Agro Chemicals',
+        contact_person: 'Admin',
+        phone: '03001234567',
+        status: 'Active'
+      });
+      console.log('[Seed] ✓ Default Company created');
+    }
+
+    // ── 9. Default Products (test4) ───────────────────────────────────────────
+    const productCount = await Product.countDocuments();
+    if (productCount === 0) {
+      const category = await Category.findOne({ code: 'PEST' }) || await Category.findOne({});
+      const unit = await Unit.findOne({ key: 'Litre' }) || await Unit.findOne({});
+
+      const defaultProduct = await Product.create({
+        name: 'test4',
+        code: 'P-TEST',
+        barcode: '1234567890',
+        category_id: category ? category._id : null,
+        company_id: company ? company._id : null,
+        unit_id: unit ? unit._id : null,
+        tax_rate: 18,
+        tax_type: 'Exclusive',
+        dealer_price: 300,
+        wholesale_price: 320,
+        retail_price: 338,
+        farmer_price: 338,
+        batches: [
+          {
+            batch_no: 'BATCH-001',
+            stock_qty: 20,
+            purchase_rate: 300,
+            selling_rate: 338,
+            mfg_date: '2026-01-01',
+            expiry_date: '2028-12-31'
+          }
+        ]
+      });
+      console.log('[Seed] ✓ Default Product "test4" created');
+
+      await WarehouseStock.create({
+        product_id: defaultProduct._id,
+        product_name: defaultProduct.name,
+        code: defaultProduct.code,
+        warehouse_qty: 0,
+        pos_counter_qty: 20,
+        min_alert_qty: 5
+      });
+      console.log('[Seed] ✓ Default WarehouseStock for "test4" created');
+    } else {
+      console.log(`[Seed] Products already exist (${productCount})`);
     }
 
     console.log('[Seed] ✅ Database initialization complete!');

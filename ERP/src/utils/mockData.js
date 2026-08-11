@@ -103,51 +103,26 @@ export const getWarehouseTransfers = () => {
   return INITIAL_TRANSFERS;
 };
 
-// Hydrate PRODUCTS from localStorage on app load (with mock item purging)
+// Force clear old localStorage cached data once to migrate to live MongoDB
 try {
-  const savedProducts = getStoredData('AGRO_ERP_PRODUCTS', null);
-  if (savedProducts && Array.isArray(savedProducts)) {
-    const isMockProduct = (p) => {
-      const name = (p.name || '').toLowerCase();
-      const code = (p.code || '').toLowerCase();
-      const id = (p.id || '').toLowerCase();
-      return id === 'p1' || id === 'p2' || id === 'p3' || id === 'p4' || id === 'p5' ||
-             id.startsWith('mock') ||
-             name.includes('glyphosate') || name.includes('imidacloprid') ||
-             name.includes('urea') || name.includes('cotton bt') || name.includes('cartap') ||
-             code.includes('p-gly') || code.includes('p-imi') || code.includes('p-ure') || code.includes('p-cot') || code.includes('p-car');
-    };
-    const cleanProducts = savedProducts.filter(p => !isMockProduct(p));
-    PRODUCTS.length = 0;
-    PRODUCTS.push(...cleanProducts);
-    setStoredData('AGRO_ERP_PRODUCTS', cleanProducts);
+  if (typeof window !== 'undefined' && !localStorage.getItem('AGRO_DB_MIGRATION_V2')) {
+    localStorage.removeItem('AGRO_ERP_PRODUCTS');
+    localStorage.removeItem('AGRO_ERP_COMPANIES');
+    localStorage.removeItem('AGRO_ERP_CATEGORIES');
+    localStorage.removeItem('AGRO_ERP_INVOICES');
+    localStorage.removeItem('AGRO_ERP_HELD_SALES');
+    localStorage.removeItem('AGRO_ERP_STOCK_MOVEMENTS');
+    localStorage.removeItem('AGRO_ERP_WAREHOUSE_STOCK');
+    localStorage.setItem('AGRO_DB_MIGRATION_V2', 'true');
+    console.log('[Migration] Stale localStorage purged successfully.');
   }
 } catch (e) {
-  console.error('Failed to hydrate products from storage:', e);
+  console.error('Migration failed:', e);
 }
 
-// Hydrate COMPANIES from localStorage on app load (with mock company purging)
-try {
-  const savedCompanies = getStoredData('AGRO_ERP_COMPANIES', null);
-  if (savedCompanies && Array.isArray(savedCompanies)) {
-    const isMockComp = (c) => {
-      const id = (c.id || '').toLowerCase();
-      const name = (c.name || '').toLowerCase();
-      return id === 'c1' || id === 'c2' || id === 'c3' || id === 'c4' || id === 'c5' ||
-             id.startsWith('mock') ||
-             name.includes('syngenta') || name.includes('bayer') || name.includes('upl') ||
-             name.includes('iffco') || name.includes('coromandel') || name.includes('crystal') ||
-             name.includes('tara') || name.includes('engro') || name.includes('ffc') ||
-             name.includes('fmc') || name.includes('agro corp');
-    };
-    const cleanCompanies = savedCompanies.filter(c => !isMockComp(c));
-    COMPANIES.length = 0;
-    COMPANIES.push(...cleanCompanies);
-    setStoredData('AGRO_ERP_COMPANIES', cleanCompanies);
-  }
-} catch (e) {
-  console.error('Failed to hydrate companies from storage:', e);
-}
+// Hydrate PRODUCTS from localStorage disabled to enforce live MongoDB data loading
+// PRODUCTS and COMPANIES start as empty arrays and load exclusively from database.
+
 
 // Comprehensive Purge of old cached seed mock records across all localStorage keys
 export const clearAllSystemTestData = () => {
