@@ -43,21 +43,20 @@ const createPO = async (poData) => {
           if (!product.batches || product.batches.length === 0) {
             product.batches.push({
               batch_no: item.batch_no || `BATCH-${Date.now()}`,
-              stock_qty: itemQty,
+              stock_qty: 0, // Starts at 0 in counter inventory, exists in warehouse only
               mfg_date: 'N/A',
               expiry_date: 'N/A',
               purchase_rate: Number(item.cost || item.rate) || 0,
               selling_rate: product.retail_price || 0
             });
           } else {
-            product.batches[0].stock_qty = (product.batches[0].stock_qty || 0) + itemQty;
             if (Number(item.cost || item.rate) > 0) {
               product.batches[0].purchase_rate = Number(item.cost || item.rate);
             }
           }
           product.markModified('batches');
           await product.save();
-
+ 
           await WarehouseStock.findOneAndUpdate(
             { product_id: product._id },
             { $inc: { warehouse_qty: itemQty } },
@@ -67,19 +66,19 @@ const createPO = async (poData) => {
       }
     }
   }
-
+ 
   return po;
 };
-
+ 
 const updatePOStatus = async (id, status, currentUser = null) => {
   const po = await PurchaseOrder.findById(id);
   if (!po) throw new ApiError(404, 'Purchase Order not found');
-
+ 
   const oldStatus = po.status;
   po.status = status;
   await po.save();
-
-  // When PO status becomes "Received", auto-add stock to Central Warehouse & batch records
+ 
+  // When PO status becomes "Received", auto-add stock to Central Warehouse only (counter starts at 0 until transferred)
   if (status === 'Received' && oldStatus !== 'Received') {
     for (const item of po.items) {
       if (item.product_id) {
@@ -88,14 +87,13 @@ const updatePOStatus = async (id, status, currentUser = null) => {
           // Add or update batch
           const batchNo = item.batch_no || `BATCH-${Date.now()}`;
           const existingBatch = product.batches.find(b => b.batch_no === batchNo);
-
+ 
           if (existingBatch) {
-            existingBatch.stock_qty += item.qty;
             existingBatch.purchase_rate = item.cost;
           } else {
             product.batches.push({
               batch_no: batchNo,
-              stock_qty: item.qty,
+              stock_qty: 0, // Starts at 0 in counter inventory, exists in warehouse only
               mfg_date: item.mfg_date || 'N/A',
               expiry_date: item.expiry_date || 'N/A',
               purchase_rate: item.cost,

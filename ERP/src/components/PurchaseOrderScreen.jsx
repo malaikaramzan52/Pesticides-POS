@@ -614,13 +614,12 @@ const addPOItemsToWarehouse = (po) => {
       updatedWarehouseStock.push(newItem);
     }
 
-    // 2. Also ensure product exists in master PRODUCTS catalog
+    // 2. Also ensure product exists in master PRODUCTS catalog (starts at 0 counter stock, exists in warehouse only)
     let masterProd = PRODUCTS.find(p => (prodId && (p._id === prodId || p.id === prodId)) || p.name?.toLowerCase() === productName?.toLowerCase());
     if (masterProd) {
       if (!masterProd.batches || masterProd.batches.length === 0) {
-        masterProd.batches = [{ id: `B_${Date.now()}`, batch_no: `B_${new Date().getFullYear()}_1`, stock_qty: qty, purchase_rate: unitCost }];
+        masterProd.batches = [{ id: `B_${Date.now()}`, batch_no: `B_${new Date().getFullYear()}_1`, stock_qty: 0, purchase_rate: unitCost }];
       } else {
-        masterProd.batches[0].stock_qty = (masterProd.batches[0].stock_qty || 0) + qty;
         if (unitCost > 0) masterProd.batches[0].purchase_rate = unitCost;
       }
     } else {
@@ -645,7 +644,7 @@ const addPOItemsToWarehouse = (po) => {
             expiry_date: '2028-12-31',
             purchase_rate: unitCost,
             selling_rate: Math.round(unitCost * 1.25) || 500,
-            stock_qty: qty
+            stock_qty: 0
           }
         ]
       };
