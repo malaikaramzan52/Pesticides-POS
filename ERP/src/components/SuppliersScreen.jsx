@@ -27,7 +27,7 @@ import {
   Package
 } from 'lucide-react';
 import { PRODUCTS, CATEGORIES } from '../utils/mockData';
-import { vendorApi } from '../api';
+import { vendorApi, companyApi } from '../api';
 import DateFilterBar from './DateFilterBar';
 import { isItemInDateRange } from '../utils/dateUtils';
 import { useLanguage } from '../context/LanguageContext';
@@ -49,6 +49,7 @@ const EMPTY_VENDOR_FORM = {
 export default function SuppliersScreen({ selectedCity, setSelectedCity, cities = [] }) {
   const { t } = useLanguage();
   const [vendors, setVendors] = useState(INITIAL_VENDORS);
+  const [companies, setCompanies] = useState([]);
 
   useEffect(() => {
     const fetchVendors = async () => {
@@ -57,7 +58,14 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
         if (data && Array.isArray(data) && data.length > 0) setVendors(data);
       } catch (e) {}
     };
+    const fetchCompanies = async () => {
+      try {
+        const data = await companyApi.getAll();
+        if (data && Array.isArray(data)) setCompanies(data);
+      } catch (e) {}
+    };
     fetchVendors();
+    fetchCompanies();
   }, []);
 
   // Filters State
@@ -608,6 +616,7 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
         <VendorFormModal
           mode={vendorFormModal.mode}
           vendor={vendorFormModal.vendor}
+          companies={companies}
           onClose={() => setVendorFormModal({ open: false, mode: 'add', vendor: null })}
           onSave={handleSaveVendor}
         />
@@ -694,7 +703,15 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
 }
 
 // ── ADD / EDIT VENDOR FORM MODAL ──────────────────────────────────────────────
-function VendorFormModal({ mode, vendor, onClose, onSave }) {
+function VendorFormModal({ mode, vendor, companies = [], onClose, onSave }) {
+  const [isCustomCompany, setIsCustomCompany] = useState(() => {
+    if (!vendor || !vendor.company_name) return false;
+    if (companies && companies.length > 0) {
+      return !companies.some(c => c.name === vendor.company_name);
+    }
+    return true;
+  });
+
   const [formData, setFormData] = useState(() => {
     if (mode === 'edit' && vendor) {
       return {
@@ -818,16 +835,54 @@ function VendorFormModal({ mode, vendor, onClose, onSave }) {
             {/* Company Name & Contact Person */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
-                  Company Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Syngenta Crop Protection"
-                  value={formData.company_name}
-                  onChange={(e) => updateField('company_name', e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none"
-                />
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase">
+                    Company Name <span className="text-red-500">*</span>
+                  </label>
+                  {companies && companies.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomCompany(!isCustomCompany);
+                        updateField('company_name', '');
+                      }}
+                      className="text-[9px] font-bold text-green-600 hover:text-green-700 cursor-pointer"
+                    >
+                      {isCustomCompany ? 'Select from List' : 'Type Manually'}
+                    </button>
+                  )}
+                </div>
+
+                {!isCustomCompany && companies && companies.length > 0 ? (
+                  <select
+                    value={formData.company_name}
+                    onChange={(e) => {
+                      const selectedVal = e.target.value;
+                      updateField('company_name', selectedVal);
+                      const matched = companies.find(c => c.name === selectedVal);
+                      if (matched) {
+                        updateField('contact_person', matched.contact_person || '');
+                        updateField('phone', matched.phone || '');
+                        updateField('email', matched.email || '');
+                        updateField('city', matched.city || '');
+                      }
+                    }}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none cursor-pointer"
+                  >
+                    <option value="">Select Company</option>
+                    {companies.map(c => (
+                      <option key={c._id || c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder="e.g. Syngenta Crop Protection"
+                    value={formData.company_name}
+                    onChange={(e) => updateField('company_name', e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none"
+                  />
+                )}
                 {errors.company_name && <span className="text-[10px] text-red-500 font-bold">{errors.company_name}</span>}
               </div>
 
