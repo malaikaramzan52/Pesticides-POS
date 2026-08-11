@@ -4,22 +4,30 @@ const Account         = require('../models/Account');
 const Customer        = require('../models/Customer');
 const ExpenseCategory = require('../models/ExpenseCategory');
 const Category        = require('../models/Category');
-const Brand           = require('../models/Brand');
 const StoreSettings   = require('../models/StoreSettings');
 const bcrypt          = require('bcryptjs');
+
+// Note: Brand requires company_id (ObjectId ref) so we skip auto-seeding brands.
+// Brands are created by the user through the UI after adding Companies.
 
 const seedDefaultData = async () => {
   try {
     console.log('[Seed] Starting database initialization...');
 
-    // ── 1. Units ─────────────────────────────────────────────────────────────
+    // ── 1. Units ──────────────────────────────────────────────────────────────
     const unitCount = await Unit.countDocuments();
     if (unitCount === 0) {
       await Unit.insertMany([
-        { name: 'Litre' }, { name: 'Kg' }, { name: 'Gram' },
-        { name: 'ml' }, { name: 'Bag' }, { name: 'Packet' },
-        { name: 'Bottle' }, { name: 'Box' }, { name: 'Piece' },
-        { name: 'Dozen' },
+        { name: 'Litre',  key: 'Litre' },
+        { name: 'Kg',     key: 'Kg' },
+        { name: 'Gram',   key: 'Gram' },
+        { name: 'ml',     key: 'ml' },
+        { name: 'Bag',    key: 'Bag' },
+        { name: 'Packet', key: 'Packet' },
+        { name: 'Bottle', key: 'Bottle' },
+        { name: 'Box',    key: 'Box' },
+        { name: 'Piece',  key: 'Piece' },
+        { name: 'Dozen',  key: 'Dozen' },
       ]);
       console.log('[Seed] ✓ Units created');
     } else {
@@ -43,20 +51,7 @@ const seedDefaultData = async () => {
       console.log(`[Seed] Categories already exist (${catCount})`);
     }
 
-    // ── 3. Brands ─────────────────────────────────────────────────────────────
-    const brandCount = await Brand.countDocuments();
-    if (brandCount === 0) {
-      await Brand.insertMany([
-        { name: 'Syngenta' }, { name: 'Bayer' }, { name: 'BASF' },
-        { name: 'FMC' }, { name: 'Dow AgroSciences' }, { name: 'Corteva' },
-        { name: 'Nufarm' }, { name: 'UPL' }, { name: 'Local Brand' },
-      ]);
-      console.log('[Seed] ✓ Brands created');
-    } else {
-      console.log(`[Seed] Brands already exist (${brandCount})`);
-    }
-
-    // ── 4. Expense Categories ─────────────────────────────────────────────────
+    // ── 3. Expense Categories ─────────────────────────────────────────────────
     const expCatCount = await ExpenseCategory.countDocuments();
     if (expCatCount === 0) {
       await ExpenseCategory.insertMany([
@@ -73,7 +68,7 @@ const seedDefaultData = async () => {
       console.log(`[Seed] Expense categories already exist (${expCatCount})`);
     }
 
-    // ── 5. Payment Accounts ───────────────────────────────────────────────────
+    // ── 4. Payment Accounts ───────────────────────────────────────────────────
     const accountCount = await Account.countDocuments();
     if (accountCount === 0) {
       await Account.insertMany([
@@ -91,7 +86,7 @@ const seedDefaultData = async () => {
       console.log(`[Seed] Accounts already exist (${accountCount})`);
     }
 
-    // ── 6. Walk-in Customer (required for POS) ────────────────────────────────
+    // ── 5. Walk-in Customer (required for POS) ────────────────────────────────
     const walkIn = await Customer.findOne({ code: 'CUST-WALK' });
     if (!walkIn) {
       await Customer.create({
@@ -109,7 +104,7 @@ const seedDefaultData = async () => {
       console.log('[Seed] Walk-in Customer already exists');
     }
 
-    // ── 7. Admin User ─────────────────────────────────────────────────────────
+    // ── 6. Admin User ─────────────────────────────────────────────────────────
     let adminUser = await User.findOne({ username: 'admin' });
     if (!adminUser) {
       const salt = await bcrypt.genSalt(10);
@@ -124,18 +119,17 @@ const seedDefaultData = async () => {
       });
       console.log('[Seed] ✓ Admin user created  (passcode: 0000)');
     } else {
-      // Ensure admin passcode is correct
       const isMatch = await adminUser.matchPasscode('0000');
       if (!isMatch) {
         adminUser.passcode = '0000';
         await adminUser.save();
-        console.log('[Seed] ✓ Admin passcode updated to 0000');
+        console.log('[Seed] ✓ Admin passcode synced to 0000');
       } else {
         console.log('[Seed] Admin user already exists');
       }
     }
 
-    // ── 8. Store Settings ─────────────────────────────────────────────────────
+    // ── 7. Store Settings ─────────────────────────────────────────────────────
     const settingsCount = await StoreSettings.countDocuments();
     if (settingsCount === 0) {
       await StoreSettings.create({
@@ -161,6 +155,4 @@ const seedDefaultData = async () => {
   }
 };
 
-module.exports = {
-  seedDefaultData
-};
+module.exports = { seedDefaultData };
