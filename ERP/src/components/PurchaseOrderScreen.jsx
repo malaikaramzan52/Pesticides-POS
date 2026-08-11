@@ -707,7 +707,18 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
     const fetchPOs = async () => {
       try {
         const data = await purchaseApi.getAll();
-        if (data && Array.isArray(data) && data.length > 0) setPoList(data);
+        if (data && Array.isArray(data) && data.length > 0) {
+          const normalized = data.map(po => {
+            const resolvedPoNo = po.po_no || po.po_number || po.id || (po._id ? `PO-2026-${String(po._id).slice(-4).toUpperCase()}` : 'PO-2026');
+            return {
+              ...po,
+              id: resolvedPoNo,
+              po_no: resolvedPoNo,
+              po_number: resolvedPoNo
+            };
+          });
+          setPoList(normalized);
+        }
       } catch (e) {}
     };
     const fetchCompanies = async () => {
@@ -756,11 +767,28 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
   };
 
   const handleSavePO = async (newPO) => {
-    let poToAdd = { ...newPO, status: 'Received', stock_inward_done: true };
+    let poToAdd = { 
+      ...newPO, 
+      po_no: newPO.po_no || newPO.id,
+      po_number: newPO.po_no || newPO.id,
+      status: 'Received', 
+      stock_inward_done: true 
+    };
     addPOItemsToWarehouse(poToAdd);
 
     try {
-      await purchaseApi.create(poToAdd).catch(() => {});
+      const created = await purchaseApi.create(poToAdd).catch(() => null);
+      if (created && (created.po_no || created._id)) {
+        const resolvedNo = created.po_no || newPO.po_no;
+        poToAdd = {
+          ...created,
+          po_no: resolvedNo,
+          po_number: resolvedNo,
+          id: resolvedNo,
+          status: 'Received',
+          stock_inward_done: true
+        };
+      }
     } catch(e) {}
 
     if (triggerNotificationToast) {
@@ -771,7 +799,7 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
     savePOState(newList);
     setShowForm(false);
     if (addAuditLog) {
-      addAuditLog('Create PO', `Created PO ${newPO.id || newPO.po_no} (${newPO.supplier}) total Rs. ${newPO.total}`);
+      addAuditLog('Create PO', `Created PO ${poToAdd.po_no || poToAdd.id} (${poToAdd.supplier}) total Rs. ${poToAdd.total}`);
     }
   };
 
