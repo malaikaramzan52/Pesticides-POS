@@ -27,6 +27,7 @@ import { useLanguage } from '../context/LanguageContext';
 const INIT_PO_LIST = [
   {
     id: 'PO-2026-001',
+    po_no: 'PO-2026-001',
     date: '2026-08-01',
     supplier: 'Syngenta Pakistan Ltd',
     items: [{ id: '1', name: 'Glyphosate 41% SL', qty: 50, cost: 350, total: 17500 }],
@@ -38,6 +39,7 @@ const INIT_PO_LIST = [
   },
   {
     id: 'PO-2026-002',
+    po_no: 'PO-2026-002',
     date: '2026-08-05',
     supplier: 'Bayer CropScience',
     items: [{ id: '2', name: 'Imidacloprid 200 SL', qty: 30, cost: 600, total: 18000 }],
@@ -88,7 +90,7 @@ function PODetailModal({ po, onClose, onMarkReceived, onIssuePO }) {
             </div>
             <div>
               <span className="text-[10px] font-black text-green-100 uppercase tracking-widest block">Official Purchase Invoice</span>
-              <h2 className="text-base font-extrabold font-mono tracking-tight">{po.id}</h2>
+              <h2 className="text-base font-extrabold font-mono tracking-tight">{po.po_no || po.po_number || po.id || 'PO-2026'}</h2>
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -219,7 +221,7 @@ function PODetailModal({ po, onClose, onMarkReceived, onIssuePO }) {
 
           {po.status === 'Issued' && (
             <button
-              onClick={() => { onMarkReceived(po.id); onClose(); }}
+              onClick={() => { onMarkReceived(po._id || po.id || po.po_no); onClose(); }}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer"
             >
               <CheckCircle2 size={14} /> Mark Received
@@ -228,7 +230,7 @@ function PODetailModal({ po, onClose, onMarkReceived, onIssuePO }) {
 
           {po.status === 'Draft' && (
             <button
-              onClick={() => { if(onIssuePO) { onIssuePO(po.id); onClose(); } }}
+              onClick={() => { if(onIssuePO) { onIssuePO(po._id || po.id || po.po_no); onClose(); } }}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer"
             >
               <Send size={14} /> Issue PO
@@ -380,8 +382,11 @@ function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast, companie
 
   const save = (status) => {
     if (!cart.length) return;
+    const poNum = `PO-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
     onSave({
-      id: `PO-2026-${String(Date.now()).slice(-4)}`,
+      id: poNum,
+      po_no: poNum,
+      po_number: poNum,
       supplier, date: new Date().toISOString().split('T')[0],
       total: grandTotal, status,
       itemsCount: cart.length, items: cart,
@@ -730,15 +735,15 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
     const q = searchQuery.toLowerCase();
     return dateFilteredPOs.filter(po => {
       if (!po) return false;
-      const poId = po.id || po.po_number || po.purchase_no || '';
+      const poId = po.po_no || po.po_number || po.id || '';
       const supplierName = po.supplier || po.supplier_name || po.vendor_id?.company_name || '—';
       return (
         po.status !== 'Cancelled' && 
-        (!q || poId.toLowerCase().includes(q) || supplierName.toLowerCase().includes(q) || getSupplierCity(supplierName).toLowerCase().includes(q)) &&
+        (!q || poId.toLowerCase().includes(q) || supplierName.toLowerCase().includes(q) || getSupplierCity(supplierName, companies).toLowerCase().includes(q)) &&
         (!statusFilter || po.status === statusFilter)
       );
     });
-  }, [dateFilteredPOs, searchQuery, statusFilter]);
+  }, [dateFilteredPOs, searchQuery, statusFilter, companies]);
 
   // Stats
   const totalCost    = dateFilteredPOs.reduce((s, p) => s + (p.total || p.grand_total || 0), 0);
@@ -771,14 +776,14 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
   };
 
   const markReceived = async (id) => {
-    const targetPO = poList.find(p => (p._id || p.id) === id);
+    const targetPO = poList.find(p => (p._id || p.id || p.po_no) === id);
     if (targetPO) {
       addPOItemsToWarehouse(targetPO);
       try {
         await purchaseApi.updateStatus(targetPO._id || targetPO.id, 'Received').catch(() => {});
       } catch(e) {}
     }
-    const newList = poList.map(p => (p._id || p.id) === id ? { ...p, status: 'Received', stock_inward_done: true } : p);
+    const newList = poList.map(p => (p._id || p.id || p.po_no) === id ? { ...p, status: 'Received', stock_inward_done: true } : p);
     savePOState(newList);
 
     if (triggerNotificationToast) {
@@ -791,14 +796,14 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
 
   const deletePO = (id) => {
     if (window.confirm('Are you sure you want to delete this Draft PO?')) {
-      const newList = poList.filter(p => p.id !== id);
+      const newList = poList.filter(p => (p._id || p.id || p.po_no) !== id);
       savePOState(newList);
       if (triggerNotificationToast) triggerNotificationToast('PO Deleted', `PO ${id} deleted.`, 'info');
     }
   };
 
   const issuePO = (id) => {
-    const newList = poList.map(p => p.id === id ? { ...p, status: 'Issued' } : p);
+    const newList = poList.map(p => (p._id || p.id || p.po_no) === id ? { ...p, status: 'Issued' } : p);
     savePOState(newList);
     if (triggerNotificationToast) triggerNotificationToast('PO Issued', `PO ${id} has been issued to supplier.`, 'success');
   };
@@ -806,7 +811,7 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
   const cancelPO = (id) => {
     const reason = window.prompt('Enter cancellation reason:');
     if (reason !== null) {
-      const newList = poList.map(p => p.id === id ? { ...p, status: 'Cancelled', cancelReason: reason } : p);
+      const newList = poList.map(p => (p._id || p.id || p.po_no) === id ? { ...p, status: 'Cancelled', cancelReason: reason } : p);
       savePOState(newList);
       if (triggerNotificationToast) triggerNotificationToast('PO Cancelled', `PO ${id} cancelled.`, 'info');
     }
@@ -892,9 +897,9 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
                 <tr><td colSpan={7} className="py-14 text-center text-gray-400 font-medium">
                   <ShoppingBag size={28} className="mx-auto mb-2 text-gray-300" />No purchase orders found.
                 </td></tr>
-              ) : filtered.map(po => (
-                <tr key={po.id} className="hover:bg-gray-50/60 transition group">
-                  <td className="py-3.5 px-4 font-mono font-bold text-green-700 whitespace-nowrap">{po.id}</td>
+              ) : filtered.map((po, idx) => (
+                <tr key={po._id || po.id || po.po_no || `po_${idx}`} className="hover:bg-gray-50/60 transition group">
+                  <td className="py-3.5 px-4 font-mono font-bold text-green-700 whitespace-nowrap">{po.po_no || po.po_number || po.id || 'PO-2026'}</td>
                   <td className="py-3.5 px-4 font-bold text-gray-800 whitespace-nowrap">
                     <div className="flex flex-col">
                       <span>{po.supplier}</span>
@@ -937,16 +942,16 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
                       {po.status === 'Draft' && (
                         <>
                           <button onClick={() => alert('Edit functionality to be implemented')} title="Edit Draft" className="p-1.5 rounded-lg bg-gray-100 hover:bg-blue-100 text-gray-500 hover:text-blue-700 transition cursor-pointer"><FileText size={13} /></button>
-                          <button onClick={() => issuePO(po.id)} title="Issue PO" className="p-1.5 rounded-lg bg-gray-100 hover:bg-green-100 text-gray-500 hover:text-green-700 transition cursor-pointer"><Send size={13} /></button>
-                          <button onClick={() => deletePO(po.id)} title="Delete Draft" className="p-1.5 rounded-lg bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-700 transition cursor-pointer"><Trash2 size={13} /></button>
+                          <button onClick={() => issuePO(po._id || po.id || po.po_no)} title="Issue PO" className="p-1.5 rounded-lg bg-gray-100 hover:bg-green-100 text-gray-500 hover:text-green-700 transition cursor-pointer"><Send size={13} /></button>
+                          <button onClick={() => deletePO(po._id || po.id || po.po_no)} title="Delete Draft" className="p-1.5 rounded-lg bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-700 transition cursor-pointer"><Trash2 size={13} /></button>
                         </>
                       )}
 
                       {po.status === 'Issued' && (
                         <>
-                          <button onClick={() => markReceived(po.id)} title="Receive Stock" className="p-1.5 rounded-lg bg-gray-100 hover:bg-green-100 text-gray-500 hover:text-green-700 transition cursor-pointer"><CheckCircle2 size={13} /></button>
+                          <button onClick={() => markReceived(po._id || po.id || po.po_no)} title="Receive Stock" className="p-1.5 rounded-lg bg-gray-100 hover:bg-green-100 text-gray-500 hover:text-green-700 transition cursor-pointer"><CheckCircle2 size={13} /></button>
                           <button onClick={() => window.print()} title="Print PO" className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition cursor-pointer"><Printer size={13} /></button>
-                          <button onClick={() => cancelPO(po.id)} title="Cancel PO" className="p-1.5 rounded-lg bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-700 transition cursor-pointer"><X size={13} /></button>
+                          <button onClick={() => cancelPO(po._id || po.id || po.po_no)} title="Cancel PO" className="p-1.5 rounded-lg bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-700 transition cursor-pointer"><X size={13} /></button>
                         </>
                       )}
 
