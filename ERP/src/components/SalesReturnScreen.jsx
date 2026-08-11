@@ -390,7 +390,7 @@ function SearchableDropdown({ options, value, onChange, placeholder, onAddNew, a
     return text.includes(query.toLowerCase());
   });
 
-  const selectedOption = options.find(o => o.id === value);
+  const selectedOption = options.find(o => String(o.id) === String(value));
 
   return (
     <div className="relative" ref={wrapperRef}>
@@ -430,7 +430,7 @@ function SearchableDropdown({ options, value, onChange, placeholder, onAddNew, a
                     <div className="text-xs font-bold text-gray-800 truncate">{o.name}</div>
                     {o.subText && <div className="text-[10px] text-gray-400 truncate">{o.subText}</div>}
                   </div>
-                  {value === o.id && <Check size={12} className="text-green-600 flex-shrink-0" />}
+                  {String(value) === String(o.id) && <Check size={12} className="text-green-600 flex-shrink-0" />}
                 </div>
               ))
             )}
@@ -547,6 +547,8 @@ function AddProductModal({ isOpen, onClose, onAdd, supplierId }) {
 function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToast, onCancel }) {
   const [supplierId, setSupplierId] = useState('');
   const [invoiceId, setInvoiceId] = useState('');
+  const [dbPurchaseOrders, setDbPurchaseOrders] = useState([]);
+  const [dbCompanies, setDbCompanies] = useState([]);
   
   const getEmptyRow = () => ({ id: Date.now() + Math.random(), productId: '', qty: '', rate: '', reason: REASONS_PURCH[0], maxQty: null });
   const [rows, setRows] = useState([getEmptyRow()]);
@@ -557,9 +559,19 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
   const [isSupplierModalOpen, setSupplierModalOpen] = useState(false);
   const [isProductModalOpen, setProductModalOpen] = useState(false);
   
-  const purchaseOrders = useMemo(() => getStoredData('AGRO_ERP_PURCHASE_ORDERS', []).filter(po => po.status === 'Received'), []);
-  
   React.useEffect(() => {
+    const fetchDBData = async () => {
+      try {
+        const [pos, comps] = await Promise.all([
+          purchaseApi.getAll().catch(() => []),
+          companyApi.getAll().catch(() => [])
+        ]);
+        if (pos && Array.isArray(pos)) setDbPurchaseOrders(pos);
+        if (comps && Array.isArray(comps)) setDbCompanies(comps);
+      } catch (_) {}
+    };
+    fetchDBData();
+
     const draft = getStoredData('AGRO_ERP_DRAFT_PURCHASE_RETURNS', null);
     if (draft) {
       setSupplierId(draft.supplierId || '');
@@ -598,26 +610,49 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
     }
   };
 
+  const allCompaniesList = dbCompanies && dbCompanies.length > 0 ? dbCompanies : COMPANIES;
+
   const handleInvoiceChange = (invId) => {
     setInvoiceId(invId);
+    setError('');
     if (!invId) return;
-    const po = purchaseOrders.find(p => p.id === invId);
+
+    const po = dbPurchaseOrders.find(p => (p._id || p.id || p.po_no) === invId || p.po_no === invId);
     if (po) {
-      const sup = COMPANIES.find(c => c.name === po.vendor);
-      if (sup) setSupplierId(sup.id);
+      if (po.status === 'Cancelled') {
+        setError(`Purchase Order "${po.po_no || po.id}" is cancelled. Returns are not allowed.`);
+        return;
+      }
+      if (po.return_status === 'Full' || po.status === 'Returned') {
+        setError(`Purchase Order "${po.po_no || po.id}" has already been fully returned.`);
+        return;
+      }
+
+      const sup = allCompaniesList.find(c => c.name?.toLowerCase() === (po.supplier || po.supplier_name || '').toLowerCase());
+      if (sup) setSupplierId((sup._id || sup.id || sup.name)?.toString());
       
-      const newRows = po.items.map(item => {
-        const prod = PRODUCTS.find(p => p.name === item.name);
+      const newRows = (po.items || []).map(item => {
+        const returned = Number(item.returned_qty || 0);
+        const original = Number(item.qty || item.quantity || 0);
+        const remaining = Math.max(0, original - returned);
+        const prod = PRODUCTS.find(p => p.name?.toLowerCase() === item.name?.toLowerCase());
         return {
           id: Date.now() + Math.random(),
-          productId: prod ? prod.id : '',
-          qty: '',
-          maxQty: item.qty,
-          rate: item.cost || (prod ? prod.batches[0]?.purchase_rate : ''),
+          productId: prod ? prod.id : item.name,
+          productName: item.name,
+          qty: remaining > 0 ? remaining : '',
+          maxQty: remaining,
+          rate: item.cost || item.rate || (prod ? prod.batches?.[0]?.purchase_rate : 0),
           reason: REASONS_PURCH[0]
         };
-      });
-      setRows(newRows.length ? newRows : [getEmptyRow()]);
+      }).filter(r => r.maxQty > 0);
+
+      if (newRows.length === 0) {
+        setError(`All items in Purchase Order "${po.po_no || po.id}" have already been returned.`);
+        return;
+      }
+
+      setRows(newRows);
     }
   };
   
@@ -641,22 +676,23 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError(''); setSuccess('');
     
     if (!supplierId) { setError('Please select a supplier.'); return; }
     
-    const validRows = rows.filter(r => r.productId && r.qty);
+    const validRows = rows.filter(r => (r.productId || r.productName) && r.qty);
     if (validRows.length === 0) { setError('Please add at least one product with a return quantity.'); return; }
     
     const duplicateCheck = new Set();
     
     for (let r of validRows) {
-      if (duplicateCheck.has(r.productId)) {
+      const itemKey = r.productId || r.productName;
+      if (duplicateCheck.has(itemKey)) {
         setError('Duplicate products found. Please merge them into a single row.');
         return;
       }
-      duplicateCheck.add(r.productId);
+      duplicateCheck.add(itemKey);
       
       const q = parseInt(r.qty);
       if (isNaN(q) || q <= 0) {
@@ -664,13 +700,14 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
         return;
       }
       if (r.maxQty !== null && q > r.maxQty) {
-        const p = PRODUCTS.find(prod => prod.id === r.productId);
-        setError(`Return quantity for ${p?.name || 'Item'} exceeds purchased quantity (${r.maxQty}).`);
+        const pName = r.productName || PRODUCTS.find(prod => prod.id === r.productId)?.name || 'Item';
+        setError(`Return quantity for ${pName} exceeds purchased quantity (${r.maxQty}).`);
         return;
       }
     }
 
-    const supplierName = COMPANIES.find(c => c.id === supplierId)?.name || 'Unknown';
+    const selectedComp = allCompaniesList.find(c => (c._id || c.id || c.name)?.toString() === supplierId);
+    const supplierName = selectedComp ? selectedComp.name : (supplierId || 'Unknown Supplier');
     let totalRefund = 0;
     const returnedItems = [];
 
@@ -686,7 +723,7 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
       totalRefund += lineTotal;
       
       const p = PRODUCTS.find(prod => prod.id === r.productId);
-      const pName = p?.name || 'Unknown';
+      const pName = r.productName || p?.name || 'Unknown Product';
       
       returnedItems.push({ name: pName, qty: q, rate, total: lineTotal, reason: r.reason });
 
@@ -715,39 +752,55 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
     setStoredData('AGRO_ERP_WAREHOUSE_STOCK', updatedWarehouseStock);
     setStoredData('AGRO_ERP_WAREHOUSE_TRANSFERS', [...newTransfers, ...currentTransfers]);
 
+    const poObj = dbPurchaseOrders.find(p => (p._id || p.id || p.po_no) === invoiceId || p.po_no === invoiceId);
+    const poNo = poObj ? (poObj.po_no || poObj.po_number || poObj.id) : (invoiceId || 'N/A');
+
     const rec = {
       id: `PR${Date.now()}`,
       date: new Date().toISOString().split('T')[0],
       type: 'Purchase Return',
       supplier: supplierName,
-      invoice_no: invoiceId ? purchaseOrders.find(p=>p.id===invoiceId)?.po_number : null,
+      invoice_no: poNo,
       items: returnedItems,
       refund_total: totalRefund,
       status: 'Approved',
     };
 
     try {
-      purchaseApi.purchaseReturn({
-        purchase_id: invoiceId || null,
-        vendor_id: supplierId,
-        items: returnedItems,
-        refund_total: totalRefund
-      }).catch(() => {});
-    } catch(e) {}
+      await purchaseApi.purchaseReturn({
+        po_no: poNo,
+        supplier: supplierName,
+        items: returnedItems.map(i => ({
+          name: i.name,
+          qty: i.qty,
+          rate: i.rate,
+          reason: i.reason
+        })),
+        refund_total: totalRefund,
+        refund_method: 'Bank Transfer'
+      });
 
-    onReturnSaved(rec);
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Purchase Return Processed', `Return of Rs. ${totalRefund.toLocaleString()} saved to database.`, 'success');
+      }
+    } catch(err) {
+      console.error("Purchase return backend error:", err);
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Return Failed', `Database error: ${err.message || 'Please try again.'}`, 'error');
+      }
+      setError(`Return failed: ${err.message || 'Server error. Please try again.'}`);
+      return;
+    }
+
+    if (onReturnSaved) onReturnSaved(rec);
 
     if (addAuditLog) {
       addAuditLog('Purchase Return Processed', `Processed return of ${validRows.length} items to ${supplierName}. Total Refund: Rs. ${totalRefund.toLocaleString()}.`);
     }
 
-    if (triggerNotificationToast) {
-      triggerNotificationToast('Purchase Return Processed', `Return of Rs. ${totalRefund.toLocaleString()} logged successfully.`, 'success');
-    }
-    
     setStoredData('AGRO_ERP_DRAFT_PURCHASE_RETURNS', null);
 
-    setSuccess(`✅ Purchase return processed! Deducted ${validRows.length} item(s) from Warehouse Stock. Refund/Credit of Rs. ${totalRefund.toLocaleString()} logged for ${supplierName}.`);
+    setSuccess(`✅ Purchase return processed! Deducted ${validRows.length} item(s) from Warehouse Stock. Refund/Credit of Rs. ${totalRefund.toLocaleString()} saved to database for ${supplierName}.`);
     setRows([getEmptyRow()]);
     setSupplierId('');
     setInvoiceId('');
@@ -762,13 +815,22 @@ function PurchaseReturnForm({ onReturnSaved, addAuditLog, triggerNotificationToa
     if (onCancel) onCancel();
   };
 
-  const supplierOptions = COMPANIES.map(c => ({ id: c.id, name: c.name }));
+  const supplierOptions = allCompaniesList.map(c => ({
+    id: (c._id || c.id || c.name)?.toString(),
+    name: c.name
+  }));
   const productOptions = PRODUCTS.map(p => ({ 
     id: p.id, 
     name: p.name, 
     subText: `SKU: ${p.code || 'N/A'} | Barcode: ${p.barcode || 'N/A'}` 
   }));
-  const invoiceOptions = purchaseOrders.map(p => ({ id: p.id, name: p.po_number, subText: `Date: ${p.date} | Vendor: ${p.vendor}` }));
+  const invoiceOptions = dbPurchaseOrders
+    .filter(p => p.status !== 'Cancelled' && p.status !== 'Returned' && p.return_status !== 'Full')
+    .map(p => ({ 
+      id: p._id || p.id || p.po_no, 
+      name: p.po_no || p.po_number || p.id, 
+      subText: `Date: ${p.date} | Supplier: ${p.supplier}` 
+    }));
 
   const totalQty = rows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
   const grandTotal = rows.reduce((s, r) => s + ((parseInt(r.qty)||0) * (parseFloat(r.rate)||0)), 0);

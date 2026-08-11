@@ -4,6 +4,7 @@ const poItemSchema = new mongoose.Schema({
   product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
   name: { type: String, required: true },
   qty: { type: Number, required: true },
+  returned_qty: { type: Number, default: 0 },
   cost: { type: Number, required: true },
   total: { type: Number, required: true },
   batch_no: { type: String, default: 'N/A' },
@@ -27,9 +28,15 @@ const purchaseOrderSchema = new mongoose.Schema({
   vendor_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
   status: { 
     type: String, 
-    enum: ['Draft', 'Issued', 'Received', 'Cancelled', 'Returned'], 
+    enum: ['Draft', 'Issued', 'Received', 'Cancelled', 'Returned', 'Partial Return'], 
     default: 'Draft' 
   },
+  return_status: {
+    type: String,
+    enum: ['None', 'Partial', 'Full'],
+    default: 'None'
+  },
+  total_returned_amount: { type: Number, default: 0 },
   payment_method: { type: String, default: 'Bank Transfer' },
   payment_details: { type: Object, default: {} },
   items: [poItemSchema],
