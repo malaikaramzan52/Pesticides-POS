@@ -12,7 +12,8 @@ router.route('/')
   .post(restrictTo('Admin', 'Manager'), vendorValidation, validate, vendorController.createVendor);
 
 router.route('/:id')
-  .put(restrictTo('Admin', 'Manager'), vendorController.updateVendor);
+  .put(restrictTo('Admin', 'Manager'), vendorController.updateVendor)
+  .delete(restrictTo('Admin', 'Manager'), vendorController.deleteVendor);
 
 router.get('/:id/ledger', vendorController.getVendorLedger);
 router.post('/:id/payments', restrictTo('Admin', 'Manager'), vendorPaymentValidation, validate, vendorController.recordPayment);

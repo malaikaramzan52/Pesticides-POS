@@ -10,11 +10,28 @@ const getAllVendors = async () => {
 const createVendor = async (vendorData) => {
   const count = await Vendor.countDocuments();
   const code = vendorData.code || `VDR-2026-${String(count + 1).padStart(3, '0')}`;
-  return await Vendor.create({ ...vendorData, code });
+  const name = vendorData.name || vendorData.company_name || 'Vendor';
+  const company_name = vendorData.company_name || vendorData.name || name;
+  return await Vendor.create({
+    ...vendorData,
+    name,
+    company_name,
+    company: vendorData.company || company_name,
+    code
+  });
 };
 
 const updateVendor = async (id, updateData) => {
+  if (updateData.company_name && !updateData.name) {
+    updateData.name = updateData.company_name;
+  }
   const vdr = await Vendor.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
+  if (!vdr) throw new ApiError(404, 'Vendor not found');
+  return vdr;
+};
+
+const deleteVendor = async (id) => {
+  const vdr = await Vendor.findByIdAndDelete(id);
   if (!vdr) throw new ApiError(404, 'Vendor not found');
   return vdr;
 };
@@ -49,8 +66,21 @@ const getVendorLedger = async (vendorId) => {
   const vendor = await Vendor.findById(vendorId);
   if (!vendor) throw new ApiError(404, 'Vendor not found');
 
-  const pos = await PurchaseOrder.find({ vendor_id: vendorId, status: { $ne: 'Cancelled' } });
-  const payments = await VendorPayment.find({ vendor_id: vendorId });
+  const pos = await PurchaseOrder.find({
+    $or: [
+      { vendor_id: vendorId },
+      { supplier: { $regex: new RegExp(`^${vendor.name}$`, 'i') } },
+      { supplier: { $regex: new RegExp(`^${vendor.company_name}$`, 'i') } }
+    ],
+    status: { $ne: 'Cancelled' }
+  });
+
+  const payments = await VendorPayment.find({
+    $or: [
+      { vendor_id: vendorId },
+      { vendor_name: { $regex: new RegExp(`^${vendor.name}$`, 'i') } }
+    ]
+  });
 
   const rows = [];
 
@@ -99,6 +129,7 @@ module.exports = {
   getAllVendors,
   createVendor,
   updateVendor,
+  deleteVendor,
   recordVendorPayment,
   getVendorLedger
 };

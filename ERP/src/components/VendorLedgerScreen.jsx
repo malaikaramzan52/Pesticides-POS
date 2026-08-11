@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { BookOpen, Printer, Search, Download } from 'lucide-react';
+import { BookOpen, Printer, Search, Download, DollarSign, Plus, X, CheckCircle2 } from 'lucide-react';
 import { COMPANIES, getStoredData } from '../utils/mockData';
 import { purchaseApi, vendorApi } from '../api';
 import DateFilterBar from './DateFilterBar';
@@ -22,19 +22,44 @@ import { useLanguage } from '../context/LanguageContext';
 
 export default function VendorLedgerScreen({ triggerNotificationToast, dateFilter, setDateFilter, selectedCity, setSelectedCity, cities = [] }) {
   const { t } = useLanguage();
-  const [selectedVendor, setSelectedVendor] = useState(COMPANIES[0]?.name || 'Syngenta Pakistan');
+  const [selectedVendor, setSelectedVendor] = useState('Syngenta Pakistan Ltd');
   const [searchQuery, setSearchQuery] = useState('');
   const [livePOs, setLivePOs] = useState([]);
+  const [vendorsList, setVendorsList] = useState([]);
+
+  // Disbursement Modal State
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Bank Transfer');
+  const [paymentNotes, setPaymentNotes] = useState('');
 
   useEffect(() => {
-    const fetchVendorLedgerPOs = async () => {
+    const fetchVendorData = async () => {
       try {
-        const poRes = await purchaseApi.getAll();
+        const [poRes, vdrRes] = await Promise.all([
+          purchaseApi.getAll().catch(() => []),
+          vendorApi.getAll().catch(() => [])
+        ]);
         if (poRes && Array.isArray(poRes) && poRes.length > 0) setLivePOs(poRes);
+        if (vdrRes && Array.isArray(vdrRes) && vdrRes.length > 0) setVendorsList(vdrRes);
       } catch (e) {}
     };
-    fetchVendorLedgerPOs();
+    fetchVendorData();
   }, []);
+
+  const allVendorsOptions = useMemo(() => {
+    const map = new Map();
+    (vendorsList || []).forEach(v => {
+      const vName = v.company_name || v.name;
+      if (vName) map.set(vName.toLowerCase(), { id: v._id || v.id, name: vName, city: v.city || '' });
+    });
+    (COMPANIES || []).forEach(c => {
+      if (c.name && !map.has(c.name.toLowerCase())) {
+        map.set(c.name.toLowerCase(), { id: c.id || c._id, name: c.name, city: c.city || '' });
+      }
+    });
+    return Array.from(map.values());
+  }, [vendorsList]);
 
   // Fetch actual POs
   const purchaseOrders = useMemo(() => {
@@ -50,6 +75,44 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
       }
     }
   }, [selectedCity, selectedVendor]);
+
+  const handleRecordPayment = async () => {
+    if (!paymentAmount || Number(paymentAmount) <= 0) {
+      alert('Please enter a valid disbursement amount.');
+      return;
+    }
+    const matchedVendor = vendorsList.find(v => (v.company_name || v.name)?.toLowerCase() === selectedVendor.toLowerCase());
+    if (matchedVendor && (matchedVendor._id || matchedVendor.id)) {
+      try {
+        await vendorApi.recordPayment(matchedVendor._id || matchedVendor.id, {
+          amount: Number(paymentAmount),
+          payment_method: paymentMethod,
+          notes: paymentNotes || `Supplier payment to ${matchedVendor.company_name || matchedVendor.name}`
+        });
+        if (triggerNotificationToast) {
+          triggerNotificationToast('Disbursement Recorded', `Paid Rs. ${Number(paymentAmount).toLocaleString()} to ${selectedVendor}`, 'success');
+        }
+      } catch (err) {
+        alert(`Payment error: ${err.message}`);
+        return;
+      }
+    } else {
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Disbursement Logged', `Recorded Rs. ${Number(paymentAmount).toLocaleString()} for ${selectedVendor}`, 'success');
+      }
+    }
+
+    const [poRes, vdrRes] = await Promise.all([
+      purchaseApi.getAll().catch(() => []),
+      vendorApi.getAll().catch(() => [])
+    ]);
+    if (poRes && Array.isArray(poRes)) setLivePOs(poRes);
+    if (vdrRes && Array.isArray(vdrRes)) setVendorsList(vdrRes);
+
+    setShowPaymentModal(false);
+    setPaymentAmount('');
+    setPaymentNotes('');
+  };
 
   const ledgerData = useMemo(() => {
     if (!selectedVendor) return [];
@@ -134,7 +197,13 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl text-sm font-bold transition">
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+            >
+              <DollarSign size={16} /> Record Disbursement
+            </button>
+            <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl text-sm font-bold transition cursor-pointer">
               <Printer size={16} /> Print
             </button>
           </div>
@@ -147,12 +216,14 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
             <select
               value={selectedVendor}
               onChange={(e) => setSelectedVendor(e.target.value)}
-              className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-2.5 font-bold text-gray-700 focus:outline-none focus:border-purple-500 transition shadow-sm"
+              className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-2.5 font-bold text-gray-700 focus:outline-none focus:border-purple-500 transition shadow-sm cursor-pointer"
             >
               <option value="">-- Choose Vendor --</option>
-              {COMPANIES.filter(s => selectedCity === 'All' || getSupplierCity(s.name) === selectedCity).map(s => (
-                 <option key={s.id} value={s.name}>{s.name}</option>
-              ))}
+              {allVendorsOptions
+                .filter(s => selectedCity === 'All' || !s.city || s.city === selectedCity || getSupplierCity(s.name) === selectedCity)
+                .map(s => (
+                  <option key={s.id || s.name} value={s.name}>{s.name}</option>
+                ))}
             </select>
           </div>
           <div>
@@ -313,6 +384,89 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
           <BookOpen size={48} className="mx-auto mb-4 opacity-20" />
           <h3 className="text-lg font-bold text-gray-600 mb-2">No Vendor Selected</h3>
           <p className="text-sm">Please select a vendor from the dropdown above to view their financial ledger.</p>
+        </div>
+      )}
+
+      {/* ── RECORD DISBURSEMENT MODAL ── */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 no-print">
+          <div className="bg-white rounded-2xl border border-gray-200 w-full max-w-md shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center space-x-2">
+                <DollarSign size={18} className="text-green-600" />
+                <h3 className="font-extrabold text-sm text-gray-900">Record Vendor Disbursement</h3>
+              </div>
+              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Vendor / Supplier</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={selectedVendor || 'Select Vendor'}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Disbursement Amount (Rs.) *</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 50000"
+                  value={paymentAmount}
+                  onChange={e => setPaymentAmount(e.target.value)}
+                  autoFocus
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold text-gray-900 focus:border-green-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Payment Method</label>
+                <select
+                  value={paymentMethod}
+                  onChange={e => setPaymentMethod(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none cursor-pointer"
+                >
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash Payment</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Online">Online Banking / Raast</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Notes / Transaction Reference</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Cheque #10492 or Bank Ref 9940"
+                  value={paymentNotes}
+                  onChange={e => setPaymentNotes(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRecordPayment}
+                className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm flex items-center justify-center gap-1"
+              >
+                <CheckCircle2 size={14} /> Submit Payment
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

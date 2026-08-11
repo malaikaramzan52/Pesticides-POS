@@ -320,6 +320,13 @@ export const vendorApi = {
       body: JSON.stringify(paymentData)
     });
     return handleResponse(res);
+  },
+  delete: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/vendors/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
   }
 };
 

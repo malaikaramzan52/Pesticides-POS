@@ -28,6 +28,15 @@ const updateVendor = async (req, res, next) => {
   }
 };
 
+const deleteVendor = async (req, res, next) => {
+  try {
+    const vendor = await vendorService.deleteVendor(req.params.id);
+    return successResponse(res, 'Vendor deleted successfully', vendor);
+  } catch (error) {
+    next(error);
+  }
+};
+
 const recordPayment = async (req, res, next) => {
   try {
     const payment = await vendorService.recordVendorPayment(req.params.id, req.body);
@@ -50,6 +59,7 @@ module.exports = {
   getVendors,
   createVendor,
   updateVendor,
+  deleteVendor,
   recordPayment,
   getVendorLedger
 };

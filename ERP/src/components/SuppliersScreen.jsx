@@ -120,24 +120,37 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
 
   const handleDeleteVendor = async (vendorId) => {
     try {
-      await vendorApi.update(vendorId, { status: 'Inactive' });
+      await vendorApi.delete(vendorId);
       setVendors(prev => prev.filter(v => (v._id || v.id) !== vendorId));
-    } catch (e) {}
-    if (selectedVendorForView?.id === vendorId || selectedVendorForView?._id === vendorId) setSelectedVendorForView(null);
+    } catch (e) {
+      try {
+        await vendorApi.update(vendorId, { status: 'Inactive' });
+        setVendors(prev => prev.filter(v => (v._id || v.id) !== vendorId));
+      } catch (_) {}
+    }
+    if (selectedVendorForView && (selectedVendorForView._id === vendorId || selectedVendorForView.id === vendorId)) {
+      setSelectedVendorForView(null);
+    }
     setDeleteModalVendor(null);
   };
 
   const handleSaveVendor = async (savedVendorData) => {
     try {
+      const payload = {
+        ...savedVendorData,
+        name: savedVendorData.company_name || savedVendorData.name,
+        company_name: savedVendorData.company_name || savedVendorData.name
+      };
+
       if (vendorFormModal.mode === 'add') {
-        const created = await vendorApi.create(savedVendorData);
-        setVendors(prev => [created || savedVendorData, ...prev]);
+        const created = await vendorApi.create(payload);
+        setVendors(prev => [created || payload, ...prev]);
       } else {
         const targetId = savedVendorData._id || savedVendorData.id;
-        const updated = await vendorApi.update(targetId, savedVendorData);
-        setVendors(prev => prev.map(v => (v._id === targetId || v.id === targetId) ? (updated || savedVendorData) : v));
+        const updated = await vendorApi.update(targetId, payload);
+        setVendors(prev => prev.map(v => (v._id === targetId || v.id === targetId) ? (updated || payload) : v));
         if (selectedVendorForView && (selectedVendorForView._id === targetId || selectedVendorForView.id === targetId)) {
-          setSelectedVendorForView(prev => ({ ...prev, ...savedVendorData }));
+          setSelectedVendorForView(prev => ({ ...prev, ...payload }));
         }
       }
       setVendorFormModal({ open: false, mode: 'add', vendor: null });
@@ -281,13 +294,13 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
               ) : (
                 filteredVendors.map((vendor) => (
                   <tr 
-                    key={vendor.id}
+                    key={vendor._id || vendor.id || vendor.code}
                     onClick={() => handleOpenViewModal(vendor)}
                     className="hover:bg-green-50/50 transition cursor-pointer group"
                   >
                     {/* Vendor ID */}
                     <td className="py-3.5 px-4 font-mono font-bold text-green-700">
-                      {vendor.id}
+                      {vendor.code || vendor.id || vendor._id}
                     </td>
 
                     {/* Company Name */}
@@ -397,8 +410,8 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
               <div className="flex items-center space-x-3">
                 <Building2 size={22} />
                 <div>
-                  <h3 className="font-extrabold text-sm tracking-tight">{selectedVendorForView.company_name}</h3>
-                  <span className="text-[10px] text-green-100 font-mono">ID: {selectedVendorForView.id}</span>
+                  <h3 className="font-extrabold text-sm tracking-tight">{selectedVendorForView.company_name || selectedVendorForView.name}</h3>
+                  <span className="text-[10px] text-green-100 font-mono">ID: {selectedVendorForView.code || selectedVendorForView._id || selectedVendorForView.id}</span>
                 </div>
               </div>
               <div className="flex items-center space-x-3">
@@ -645,7 +658,7 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
               </button>
               <button
                 type="button"
-                onClick={() => handleDeleteVendor(deleteModalVendor.id)}
+                onClick={() => handleDeleteVendor(deleteModalVendor._id || deleteModalVendor.id)}
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm"
               >
                 Delete Vendor
