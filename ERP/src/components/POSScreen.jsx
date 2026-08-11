@@ -91,26 +91,30 @@ export default function POSScreen({
     return () => clearInterval(timer);
   }, []);
 
+  const fetchPOSProducts = async () => {
+    try {
+      const data = await productApi.getAll();
+      if (data && Array.isArray(data) && data.length > 0) {
+        const merged = [...data];
+        PRODUCTS.forEach(p => {
+          if (!merged.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
+            merged.push(p);
+          }
+        });
+        data.forEach(p => {
+          const idx = PRODUCTS.findIndex(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code);
+          if (idx !== -1) {
+            PRODUCTS[idx] = { ...PRODUCTS[idx], ...p };
+          } else {
+            PRODUCTS.unshift(p);
+          }
+        });
+        setPosProductsList(merged);
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
-    const fetchPOSProducts = async () => {
-      try {
-        const data = await productApi.getAll();
-        if (data && Array.isArray(data) && data.length > 0) {
-          const merged = [...data];
-          PRODUCTS.forEach(p => {
-            if (!merged.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
-              merged.push(p);
-            }
-          });
-          data.forEach(p => {
-            if (!PRODUCTS.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
-              PRODUCTS.unshift(p);
-            }
-          });
-          setPosProductsList(merged);
-        }
-      } catch (e) {}
-    };
     fetchPOSProducts();
   }, []);
 
@@ -337,6 +341,8 @@ export default function POSScreen({
       setSelectedInvoiceForModal(savedInvoice || newInvoice);
       setActiveModal('print_preview');
       
+      await fetchPOSProducts();
+
       resetPOSWorkspace();
       setInvoiceId(`INV-2026-${Math.floor(1000 + Math.random() * 9000)}`);
       setIsBillingDrawerOpen(false);
