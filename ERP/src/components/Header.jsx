@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { getStoredData, PRODUCTS } from '../utils/mockData';
 import { useLanguage } from '../context/LanguageContext';
+import { productApi } from '../api';
 
 export default function Header({ 
   currentUser, 
@@ -41,14 +42,29 @@ export default function Header({
   const calendarRef = useRef(null);
 
   const [liveNotifications, setLiveNotifications] = useState([]);
+  const [dbProducts, setDbProducts] = useState([]);
 
-  // Generate real notifications based on data
+  // Fetch live products from database to check for low stock and expiry
   useEffect(() => {
-    const allProducts = getStoredData('AGRO_ERP_PRODUCTS', PRODUCTS);
+    const fetchProducts = async () => {
+      try {
+        const data = await productApi.getAll();
+        if (data && Array.isArray(data)) {
+          setDbProducts(data);
+        }
+      } catch (e) {}
+    };
+    fetchProducts();
+    const interval = setInterval(fetchProducts, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Generate real notifications based on live database products
+  useEffect(() => {
     const newNotifs = [];
     let idCounter = 1;
 
-    allProducts.forEach(p => {
+    dbProducts.forEach(p => {
       let totalStock = 0;
       if (p.batches) {
         p.batches.forEach(b => {
@@ -60,9 +76,9 @@ export default function Header({
             const now = new Date();
             const diffDays = (exp - now) / (1000 * 60 * 60 * 24);
             if (diffDays < 0 && (b.stock_qty || 0) > 0) {
-              newNotifs.push({ id: idCounter++, title: 'Expired Product', text: `${p.name} (Batch: ${b.batch_no}) is expired!`, type: 'error', tab: 'inventory' });
+              newNotifs.push({ id: idCounter++, title: 'Expired Product', text: `${p.name} (Batch: ${b.batch_no || 'DEFAULT'}) is expired!`, type: 'error', tab: 'inventory' });
             } else if (diffDays >= 0 && diffDays <= 30 && (b.stock_qty || 0) > 0) {
-              newNotifs.push({ id: idCounter++, title: 'Near Expiry', text: `${p.name} (Batch: ${b.batch_no}) expires in ${Math.ceil(diffDays)} days.`, type: 'warning', tab: 'inventory' });
+              newNotifs.push({ id: idCounter++, title: 'Near Expiry', text: `${p.name} (Batch: ${b.batch_no || 'DEFAULT'}) expires in ${Math.ceil(diffDays)} days.`, type: 'warning', tab: 'inventory' });
             }
           }
         });
@@ -75,16 +91,14 @@ export default function Header({
         newNotifs.push({ id: idCounter++, title: 'Low Stock', text: `${p.name} is running low (${totalStock} left).`, type: 'warning', tab: 'inventory' });
       }
       
-      // We don't have a specific damaged_qty field in PRODUCTS yet, but if it exists we check it.
       if (p.damaged_qty && p.damaged_qty > 0) {
         newNotifs.push({ id: idCounter++, title: 'Damaged Stock', text: `${p.name} has ${p.damaged_qty} damaged items.`, type: 'error', tab: 'inventory' });
       }
     });
 
     setLiveNotifications(newNotifs);
-    // Only update badge if not viewed
     setUnreadNotifications(newNotifs.length);
-  }, [currentTime]);
+  }, [dbProducts]);
 
   // Live ticking clock for Navbar
   useEffect(() => {
