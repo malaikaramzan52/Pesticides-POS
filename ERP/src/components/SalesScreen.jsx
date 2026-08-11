@@ -171,6 +171,7 @@ function InvoiceModal({ inv, onClose, onOpenPayModal }) {
                     <th className="py-2 px-3 text-left hidden sm:table-cell">Batch</th>
                     <th className="py-2 px-3 text-center">Qty</th>
                     <th className="py-2 px-3 text-right">Rate</th>
+                    <th className="py-2 px-3 text-right">Discount</th>
                     <th className="py-2 px-3 text-right">Total</th>
                   </tr>
                 </thead>
@@ -181,6 +182,9 @@ function InvoiceModal({ inv, onClose, onOpenPayModal }) {
                       <td className="py-2 px-3 font-mono text-gray-500 text-[10px] hidden sm:table-cell">{item.batch_no || '—'}</td>
                       <td className="py-2 px-3 text-center font-bold text-gray-700">{item.quantity}</td>
                       <td className="py-2 px-3 text-right font-semibold text-gray-500">Rs. {item.price}</td>
+                      <td className="py-2 px-3 text-right font-semibold text-red-600">
+                        {item.discount > 0 ? `Rs. ${item.discount}` : '—'}
+                      </td>
                       <td className="py-2 px-3 text-right font-bold text-gray-900">Rs. {item.line_total?.toLocaleString()}</td>
                     </tr>
                   ))}
@@ -535,6 +539,7 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
                 <th className="py-3 px-4 text-left hidden sm:table-cell">Date / Time</th>
                 <th className="py-3 px-4 text-center hidden md:table-cell">Items</th>
                 <th className="py-3 px-4 text-right">Total (Rs.)</th>
+                <th className="py-3 px-4 text-right hidden sm:table-cell">Discount</th>
                 <th className="py-3 px-4 text-right hidden sm:table-cell">Paid</th>
                 <th className="py-3 px-4 text-right hidden md:table-cell">Balance</th>
                 <th className="py-3 px-4 text-center hidden lg:table-cell">Method</th>
@@ -544,7 +549,7 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
-                <tr><td colSpan={10} className="py-14 text-center text-gray-400 font-medium">
+                <tr><td colSpan={11} className="py-14 text-center text-gray-400 font-medium">
                   <Receipt size={28} className="mx-auto mb-2 text-gray-300" />
                   {hasFilters ? 'No invoices match the filters.' : 'No sales recorded yet.'}
                 </td></tr>
@@ -561,6 +566,9 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
                   </td>
                   <td className="py-3.5 px-4 text-center font-semibold text-gray-600 hidden md:table-cell">{inv.items?.length || 0}</td>
                   <td className="py-3.5 px-4 text-right font-black text-gray-900">Rs. {inv.grand_total?.toLocaleString()}</td>
+                  <td className="py-3.5 px-4 text-right font-bold text-red-600 hidden sm:table-cell">
+                    {inv.discount_amount > 0 ? `- Rs. ${inv.discount_amount?.toLocaleString()}` : '—'}
+                  </td>
                   <td className="py-3.5 px-4 text-right font-bold text-green-700 hidden sm:table-cell">Rs. {inv.paid_amount?.toLocaleString()}</td>
                   <td className={`py-3.5 px-4 text-right font-bold hidden md:table-cell ${inv.remaining_amount > 0 ? 'text-red-600' : 'text-gray-400'}`}>
                     {inv.remaining_amount > 0 ? `Rs. ${inv.remaining_amount?.toLocaleString()}` : '—'}
