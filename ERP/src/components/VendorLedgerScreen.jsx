@@ -22,10 +22,12 @@ import { useLanguage } from '../context/LanguageContext';
 
 export default function VendorLedgerScreen({ triggerNotificationToast, dateFilter, setDateFilter, selectedCity, setSelectedCity, cities = [] }) {
   const { t } = useLanguage();
-  const [selectedVendor, setSelectedVendor] = useState('Syngenta Pakistan Ltd');
+  const [selectedVendor, setSelectedVendor] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [livePOs, setLivePOs] = useState([]);
   const [vendorsList, setVendorsList] = useState([]);
+  const [paymentsList, setPaymentsList] = useState([]);
+  const [returnRecords, setReturnRecords] = useState([]);
 
   // Disbursement Modal State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -40,57 +42,82 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
           purchaseApi.getAll().catch(() => []),
           vendorApi.getAll().catch(() => [])
         ]);
-        if (poRes && Array.isArray(poRes) && poRes.length > 0) setLivePOs(poRes);
-        if (vdrRes && Array.isArray(vdrRes) && vdrRes.length > 0) setVendorsList(vdrRes);
+        if (poRes && Array.isArray(poRes)) setLivePOs(poRes);
+        if (vdrRes && Array.isArray(vdrRes)) setVendorsList(vdrRes);
+
+        const localRets = getStoredData('AGRO_ERP_RETURN_RECORDS', []);
+        setReturnRecords(localRets);
       } catch (e) {}
     };
     fetchVendorData();
   }, []);
-
-  const allVendorsOptions = useMemo(() => {
-    const map = new Map();
-    (vendorsList || []).forEach(v => {
-      const vName = v.company_name || v.name;
-      if (vName) map.set(vName.toLowerCase(), { id: v._id || v.id, name: vName, city: v.city || '' });
-    });
-    (COMPANIES || []).forEach(c => {
-      if (c.name && !map.has(c.name.toLowerCase())) {
-        map.set(c.name.toLowerCase(), { id: c.id || c._id, name: c.name, city: c.city || '' });
-      }
-    });
-    return Array.from(map.values());
-  }, [vendorsList]);
 
   // Fetch actual POs
   const purchaseOrders = useMemo(() => {
     return livePOs.length > 0 ? livePOs : getStoredData('AGRO_ERP_PURCHASE_ORDERS', []);
   }, [livePOs]);
 
+  // Options ONLY from user-created vendors and actual POs (NO fake mock companies)
+  const allVendorsOptions = useMemo(() => {
+    const map = new Map();
+    (vendorsList || []).forEach(v => {
+      const vName = (v.company_name || v.name || '').trim();
+      if (vName) map.set(vName.toLowerCase(), { id: v._id || v.id || v.code, name: vName, city: v.city || '' });
+    });
+    (purchaseOrders || []).forEach(po => {
+      const sName = (po.supplier || po.company_name || '').trim();
+      if (sName && !map.has(sName.toLowerCase())) {
+        map.set(sName.toLowerCase(), { id: po.vendor_id || sName, name: sName, city: '' });
+      }
+    });
+    return Array.from(map.values());
+  }, [vendorsList, purchaseOrders]);
+
+  // Auto-select first real vendor if none selected
+  useEffect(() => {
+    if ((!selectedVendor || !allVendorsOptions.some(v => v.name.toLowerCase() === selectedVendor.toLowerCase())) && allVendorsOptions.length > 0) {
+      setSelectedVendor(allVendorsOptions[0].name);
+    }
+  }, [allVendorsOptions]);
+
   // Clear selected vendor if city filter mismatches
   useEffect(() => {
     if (selectedVendor && selectedCity !== 'All') {
-      const vendorCity = getSupplierCity(selectedVendor);
-      if (vendorCity && vendorCity !== selectedCity) {
+      const vendorObj = allVendorsOptions.find(v => v.name.toLowerCase() === selectedVendor.toLowerCase());
+      if (vendorObj && vendorObj.city && vendorObj.city !== selectedCity) {
         setSelectedVendor('');
       }
     }
-  }, [selectedCity, selectedVendor]);
+  }, [selectedCity, selectedVendor, allVendorsOptions]);
 
   const handleRecordPayment = async () => {
     if (!paymentAmount || Number(paymentAmount) <= 0) {
       alert('Please enter a valid disbursement amount.');
       return;
     }
+    const numAmt = Number(paymentAmount);
     const matchedVendor = vendorsList.find(v => (v.company_name || v.name)?.toLowerCase() === selectedVendor.toLowerCase());
+    const refNo = `VP-${Date.now()}`;
+    const newPaymentObj = {
+      id: refNo,
+      ref_no: refNo,
+      vendor_name: selectedVendor,
+      amount: numAmt,
+      payment_method: paymentMethod,
+      type: 'Direct Disbursement',
+      notes: paymentNotes || `Disbursement to Supplier ${selectedVendor}`,
+      date: new Date().toISOString().split('T')[0]
+    };
+
     if (matchedVendor && (matchedVendor._id || matchedVendor.id)) {
       try {
         await vendorApi.recordPayment(matchedVendor._id || matchedVendor.id, {
-          amount: Number(paymentAmount),
+          amount: numAmt,
           payment_method: paymentMethod,
-          notes: paymentNotes || `Supplier payment to ${matchedVendor.company_name || matchedVendor.name}`
+          notes: paymentNotes || `Disbursement to Supplier ${selectedVendor}`
         });
         if (triggerNotificationToast) {
-          triggerNotificationToast('Disbursement Recorded', `Paid Rs. ${Number(paymentAmount).toLocaleString()} to ${selectedVendor}`, 'success');
+          triggerNotificationToast('Disbursement Recorded', `Paid Rs. ${numAmt.toLocaleString()} to ${selectedVendor}`, 'success');
         }
       } catch (err) {
         alert(`Payment error: ${err.message}`);
@@ -98,9 +125,11 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
       }
     } else {
       if (triggerNotificationToast) {
-        triggerNotificationToast('Disbursement Logged', `Recorded Rs. ${Number(paymentAmount).toLocaleString()} for ${selectedVendor}`, 'success');
+        triggerNotificationToast('Disbursement Logged', `Recorded Rs. ${numAmt.toLocaleString()} for ${selectedVendor}`, 'success');
       }
     }
+
+    setPaymentsList(prev => [...prev, newPaymentObj]);
 
     const [poRes, vdrRes] = await Promise.all([
       purchaseApi.getAll().catch(() => []),
@@ -117,48 +146,77 @@ export default function VendorLedgerScreen({ triggerNotificationToast, dateFilte
   const ledgerData = useMemo(() => {
     if (!selectedVendor) return [];
 
-    const vendorPOs = purchaseOrders
-      .filter(p => p.supplier && p.supplier.toLowerCase().includes(selectedVendor.toLowerCase()) && p.status !== 'Cancelled')
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    let runningBalance = 0;
-    const rows = [];
+    const selNameLower = selectedVendor.toLowerCase().trim();
 
-    vendorPOs.forEach(po => {
-      // 1. Record the Purchase (Credit to Vendor)
-      const purchaseAmount = po.total || 0;
-      runningBalance += purchaseAmount;
-      
-      rows.push({
-        id: `${po.id}-PUR`,
-        date: po.date,
-        ref_no: po.id,
-        type: 'Purchase',
-        debit: 0,
-        credit: purchaseAmount,
-        balance: runningBalance,
-        notes: `PO Received`
-      });
-
-      // 2. Record the Payment Made (Debit to Vendor)
-      const amountPaid = po.stock_inward_done ? po.total : 0; // if received assume fully paid in cashbook context or let's use po.total if complete
-      if (amountPaid > 0) {
-        runningBalance -= amountPaid;
-        rows.push({
-          id: `${po.id}-PAY`,
-          date: po.date,
-          ref_no: po.id,
-          type: 'Payment Made',
-          debit: amountPaid,
-          credit: 0,
-          balance: runningBalance,
-          notes: `Payment for PO`
-        });
-      }
+    const vendorPOs = purchaseOrders.filter(p => {
+      if (p.status === 'Cancelled') return false;
+      const supplierName = (p.supplier || p.supplier_name || '').toLowerCase().trim();
+      return supplierName === selNameLower || supplierName.includes(selNameLower) || selNameLower.includes(supplierName);
     });
 
-    return rows;
-  }, [selectedVendor]);
+    const vendorPayments = (paymentsList || []).filter(vp => {
+      const vName = (vp.vendor_name || vp.supplier || '').toLowerCase().trim();
+      return vName === selNameLower || vName.includes(selNameLower) || selNameLower.includes(vName);
+    });
+
+    const vendorReturns = (returnRecords || []).filter(r => {
+      if (r.type !== 'Purchase Return') return false;
+      const vName = (r.supplier || r.vendor_name || '').toLowerCase().trim();
+      return vName === selNameLower || vName.includes(selNameLower) || selNameLower.includes(vName);
+    });
+
+    const events = [];
+
+    vendorPOs.forEach(po => {
+      events.push({
+        id: `PO_${po.po_no || po.id || po._id}`,
+        date: po.date || po.createdAt?.split('T')[0] || '2026-08-01',
+        rawDate: new Date(po.date || po.createdAt || 0),
+        ref_no: po.po_no || po.po_number || po.id || 'PO',
+        type: 'PO Stock Inward',
+        debit: 0,
+        credit: Number(po.total) || 0,
+        notes: `Purchase Order Stock Inward (${po.itemsCount || (po.items ? po.items.length : 0)} items)`
+      });
+    });
+
+    vendorPayments.forEach(vp => {
+      events.push({
+        id: `PAY_${vp.ref_no || vp._id}`,
+        date: vp.date || vp.createdAt?.split('T')[0] || '2026-08-01',
+        rawDate: new Date(vp.date || vp.createdAt || 0),
+        ref_no: vp.ref_no || vp.id || 'PAY',
+        type: vp.type || 'Direct Disbursement',
+        debit: Number(vp.amount) || 0,
+        credit: 0,
+        notes: vp.notes || `Disbursement Payment (${vp.payment_method || 'Cash'})`
+      });
+    });
+
+    vendorReturns.forEach(ret => {
+      events.push({
+        id: `RET_${ret.id || ret.ref_no || ret._id}`,
+        date: ret.date || ret.createdAt?.split('T')[0] || '2026-08-01',
+        rawDate: new Date(ret.date || ret.createdAt || 0),
+        ref_no: ret.id || ret.po_no || 'RET',
+        type: 'Purchase Return',
+        debit: Number(ret.refund_total || ret.total || ret.amount) || 0,
+        credit: 0,
+        notes: ret.notes || `Purchase Return Refund`
+      });
+    });
+
+    events.sort((a, b) => a.rawDate - b.rawDate);
+
+    let runningBalance = 0;
+    return events.map(e => {
+      runningBalance = runningBalance + e.credit - e.debit;
+      return {
+        ...e,
+        balance: runningBalance
+      };
+    });
+  }, [selectedVendor, purchaseOrders, paymentsList, returnRecords]);
 
   const dateFilteredLedger = useMemo(() => {
     return ledgerData.filter(row => isItemInDateRange(row.date, dateFilter.startDate, dateFilter.endDate));
