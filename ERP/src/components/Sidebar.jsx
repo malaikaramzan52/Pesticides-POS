@@ -141,7 +141,7 @@ export default function Sidebar({ activeTab, onTabChange, isCollapsed, setIsColl
 
   return (
     <aside 
-      className={`bg-white border-r border-gray-200 h-screen flex flex-col justify-between transition-all duration-300 shadow-xl z-[90] fixed left-0 top-0 lg:translate-x-0 ${
+      className={`bg-white border-r border-gray-200 h-screen flex flex-col justify-between transition-all duration-300 shadow-xl z-[40] fixed left-0 top-0 lg:translate-x-0 ${
         isMobileOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
       } ${
         isCollapsed ? 'lg:w-20' : 'lg:w-64'
