@@ -170,7 +170,7 @@ export default function WarehouseScreen({ currentUser, triggerNotificationToast 
   }, [warehouseStock, transferModalItem, selectedStockId]);
 
   // Handle Transfer Stock submission inside Pop-up Modal
-  const handleConfirmModalTransfer = () => {
+  const handleConfirmModalTransfer = async () => {
     setModalError('');
     if (!activeModalStockItem) return;
 
@@ -185,67 +185,78 @@ export default function WarehouseScreen({ currentUser, triggerNotificationToast 
       return;
     }
 
-    // 1. Deduct from Warehouse, Add to POS Counter Qty
-    const updatedStock = warehouseStock.map(item => {
-      if (item.id === activeModalStockItem.id) {
-        return {
-          ...item,
-          warehouse_qty: item.warehouse_qty - qty,
-          pos_counter_qty: item.pos_counter_qty + qty
-        };
+    try {
+      // 1. Call Backend API to sync stock in MongoDB
+      const prodId = activeModalStockItem.product_id?._id || activeModalStockItem.product_id?.id || activeModalStockItem.product_id;
+      await warehouseApi.transferStock({
+        product_id: prodId,
+        quantity: qty
+      });
+
+      // 2. Deduct from Warehouse, Add to POS Counter Qty
+      const updatedStock = warehouseStock.map(item => {
+        if (item.id === activeModalStockItem.id || (item.product_id && (item.product_id?._id || item.product_id) === prodId)) {
+          return {
+            ...item,
+            warehouse_qty: item.warehouse_qty - qty,
+            pos_counter_qty: item.pos_counter_qty + qty
+          };
+        }
+        return item;
+      });
+
+      setWarehouseStock(updatedStock);
+      setStoredData('AGRO_ERP_WAREHOUSE_STOCK', updatedStock);
+
+      // 3. Automatically sync with global PRODUCTS array (which updates POS Screen, Products Screen, and Inventory Screen)
+      const targetProd = PRODUCTS.find(p => 
+        (p._id || p.id || '').toString() === (prodId || '').toString() ||
+        p.code === activeModalStockItem.code || 
+        p.name.toLowerCase() === activeModalStockItem.product_name.toLowerCase()
+      );
+
+      if (targetProd) {
+        if (!targetProd.batches || targetProd.batches.length === 0) {
+          targetProd.batches = [{ id: `B_${Date.now()}`, batch_no: activeModalStockItem.batch_no || 'DEFAULT', stock_qty: 0 }];
+        }
+        const targetBatch = targetProd.batches.find(b => b.batch_no === activeModalStockItem.batch_no) || targetProd.batches[0];
+        targetBatch.stock_qty = (targetBatch.stock_qty || 0) + qty;
+        saveProductsToStorage();
       }
-      return item;
-    });
 
-    setWarehouseStock(updatedStock);
-    setStoredData('AGRO_ERP_WAREHOUSE_STOCK', updatedStock);
+      // 4. Record Stock Transfer History entry
+      const newTransferRecord = {
+        id: `TRF-2026-${String(transfersHistory.length + 1).padStart(3, '0')}`,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        type: 'Transfer to POS',
+        product_name: activeModalStockItem.product_name,
+        batch_no: activeModalStockItem.batch_no,
+        source: `Main Warehouse (${activeModalStockItem.rack_no || 'Godown'})`,
+        destination: modalDestination,
+        qty: qty,
+        unit: activeModalStockItem.unit,
+        handled_by: modalHandledBy || currentUser?.name || 'Store Keeper',
+        notes: modalNotes || 'Direct stock dispatch via Product Catalog modal',
+        status: 'Completed'
+      };
 
-    // 2. Automatically sync with global PRODUCTS array (which updates POS Screen, Products Screen, and Inventory Screen)
-    const targetProd = PRODUCTS.find(p => 
-      p.id === activeModalStockItem.product_id || 
-      p.code === activeModalStockItem.code || 
-      p.name.toLowerCase() === activeModalStockItem.product_name.toLowerCase()
-    );
+      const updatedHistory = [newTransferRecord, ...transfersHistory];
+      setTransfersHistory(updatedHistory);
+      setStoredData('AGRO_ERP_WAREHOUSE_TRANSFERS', updatedHistory);
 
-    if (targetProd) {
-      if (!targetProd.batches || targetProd.batches.length === 0) {
-        targetProd.batches = [{ id: `B_${Date.now()}`, batch_no: activeModalStockItem.batch_no || 'DEFAULT', stock_qty: 0 }];
+      const msg = `Successfully transferred ${qty} ${activeModalStockItem.unit} of "${activeModalStockItem.product_name}" to POS Counter & Inventory!`;
+      setAlertSuccess(`✅ ${msg}`);
+
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Stock Transferred to POS', `${qty} units added to POS Counter & Inventory`, 'success');
       }
-      const targetBatch = targetProd.batches.find(b => b.batch_no === activeModalStockItem.batch_no) || targetProd.batches[0];
-      targetBatch.stock_qty = (targetBatch.stock_qty || 0) + qty;
-      saveProductsToStorage();
+
+      setTransferModalItem(null);
+      setModalQty('');
+      setModalNotes('');
+    } catch (err) {
+      setModalError(err.message || 'Error occurred during stock transfer');
     }
-
-    // 3. Record Stock Transfer History entry
-    const newTransferRecord = {
-      id: `TRF-2026-${String(transfersHistory.length + 1).padStart(3, '0')}`,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      type: 'Transfer to POS',
-      product_name: activeModalStockItem.product_name,
-      batch_no: activeModalStockItem.batch_no,
-      source: `Main Warehouse (${activeModalStockItem.rack_no || 'Godown'})`,
-      destination: modalDestination,
-      qty: qty,
-      unit: activeModalStockItem.unit,
-      handled_by: modalHandledBy || currentUser?.name || 'Store Keeper',
-      notes: modalNotes || 'Direct stock dispatch via Product Catalog modal',
-      status: 'Completed'
-    };
-
-    const updatedHistory = [newTransferRecord, ...transfersHistory];
-    setTransfersHistory(updatedHistory);
-    setStoredData('AGRO_ERP_WAREHOUSE_TRANSFERS', updatedHistory);
-
-    const msg = `Successfully transferred ${qty} ${activeModalStockItem.unit} of "${activeModalStockItem.product_name}" to POS Counter & Inventory!`;
-    setAlertSuccess(`✅ ${msg}`);
-
-    if (triggerNotificationToast) {
-      triggerNotificationToast('Stock Transferred to POS', `${qty} units added to POS Counter & Inventory`, 'success');
-    }
-
-    setTransferModalItem(null);
-    setModalQty('');
-    setModalNotes('');
   };
 
   // Form State: Transfer Stock to Inventory/POS
@@ -305,7 +316,7 @@ export default function WarehouseScreen({ currentUser, triggerNotificationToast 
   }, [warehouseStock]);
 
   // ─── Handle Transfer Stock Submission ──────────────────────────────────────────
-  const handleTransferSubmit = (e) => {
+  const handleTransferSubmit = async (e) => {
     e.preventDefault();
     setAlertError(''); setAlertSuccess('');
 
@@ -326,71 +337,82 @@ export default function WarehouseScreen({ currentUser, triggerNotificationToast 
       return;
     }
 
-    // 1. Deduct from Warehouse, Add to POS Counter Qty
-    const updatedStock = warehouseStock.map(item => {
-      if (item.id === targetStockItem.id) {
-        return {
-          ...item,
-          warehouse_qty: item.warehouse_qty - transferQty,
-          pos_counter_qty: item.pos_counter_qty + transferQty
-        };
+    try {
+      // 1. Call Backend API to sync stock in MongoDB
+      const prodId = targetStockItem.product_id?._id || targetStockItem.product_id?.id || targetStockItem.product_id;
+      await warehouseApi.transferStock({
+        product_id: prodId,
+        quantity: transferQty
+      });
+
+      // 2. Deduct from Warehouse, Add to POS Counter Qty
+      const updatedStock = warehouseStock.map(item => {
+        if (item.id === targetStockItem.id || (item.product_id && (item.product_id?._id || item.product_id) === prodId)) {
+          return {
+            ...item,
+            warehouse_qty: item.warehouse_qty - transferQty,
+            pos_counter_qty: item.pos_counter_qty + transferQty
+          };
+        }
+        return item;
+      });
+
+      setWarehouseStock(updatedStock);
+      setStoredData('AGRO_ERP_WAREHOUSE_STOCK', updatedStock);
+
+      // 3. Automatically sync with global PRODUCTS array (which updates POS Screen, Products Screen, and Inventory Screen)
+      const targetProd = PRODUCTS.find(p => 
+        (p._id || p.id || '').toString() === (prodId || '').toString() ||
+        p.code === targetStockItem.code || 
+        p.name.toLowerCase() === targetStockItem.product_name.toLowerCase()
+      );
+
+      if (targetProd) {
+        if (!targetProd.batches || targetProd.batches.length === 0) {
+          targetProd.batches = [{ id: `B_${Date.now()}`, batch_no: targetStockItem.batch_no || 'DEFAULT', stock_qty: 0 }];
+        }
+        const targetBatch = targetProd.batches.find(b => b.batch_no === targetStockItem.batch_no) || targetProd.batches[0];
+        targetBatch.stock_qty = (targetBatch.stock_qty || 0) + transferQty;
+        saveProductsToStorage();
       }
-      return item;
-    });
 
-    setWarehouseStock(updatedStock);
-    setStoredData('AGRO_ERP_WAREHOUSE_STOCK', updatedStock);
+      // 4. Record Stock Transfer History entry
+      const newTransferRecord = {
+        id: `TRF-2026-${String(transfersHistory.length + 1).padStart(3, '0')}`,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        type: 'Transfer to POS',
+        product_name: targetStockItem.product_name,
+        batch_no: targetStockItem.batch_no,
+        source: `Main Warehouse (${targetStockItem.rack_no})`,
+        destination: transferForm.destination,
+        qty: transferQty,
+        unit: targetStockItem.unit,
+        handled_by: transferForm.handledBy,
+        notes: transferForm.notes || 'Routine stock dispatch to POS counter',
+        status: 'Completed'
+      };
 
-    // 2. Automatically sync with global PRODUCTS array (which updates POS Screen, Products Screen, and Inventory Screen)
-    const targetProd = PRODUCTS.find(p => 
-      p.id === targetStockItem.product_id || 
-      p.code === targetStockItem.code || 
-      p.name.toLowerCase() === targetStockItem.product_name.toLowerCase()
-    );
+      const updatedHistory = [newTransferRecord, ...transfersHistory];
+      setTransfersHistory(updatedHistory);
+      setStoredData('AGRO_ERP_WAREHOUSE_TRANSFERS', updatedHistory);
 
-    if (targetProd) {
-      if (!targetProd.batches || targetProd.batches.length === 0) {
-        targetProd.batches = [{ id: `B_${Date.now()}`, batch_no: targetStockItem.batch_no || 'DEFAULT', stock_qty: 0 }];
+      const msg = `Successfully transferred ${transferQty} ${targetStockItem.unit} of "${targetStockItem.product_name}" to POS Counter & Inventory!`;
+      setAlertSuccess(`✅ ${msg}`);
+
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Stock Transferred to POS', `${transferQty} units added to POS Counter & Inventory`, 'success');
       }
-      const targetBatch = targetProd.batches.find(b => b.batch_no === targetStockItem.batch_no) || targetProd.batches[0];
-      targetBatch.stock_qty = (targetBatch.stock_qty || 0) + transferQty;
-      saveProductsToStorage();
+
+      setTransferForm({
+        ...transferForm,
+        qty: '',
+        notes: ''
+      });
+
+      setTimeout(() => setActiveTab('history'), 900);
+    } catch (err) {
+      setAlertError(err.message || 'Error occurred during stock transfer');
     }
-
-    // 3. Record Stock Transfer History entry
-    const newTransferRecord = {
-      id: `TRF-2026-${String(transfersHistory.length + 1).padStart(3, '0')}`,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      type: 'Transfer to POS',
-      product_name: targetStockItem.product_name,
-      batch_no: targetStockItem.batch_no,
-      source: `Main Warehouse (${targetStockItem.rack_no})`,
-      destination: transferForm.destination,
-      qty: transferQty,
-      unit: targetStockItem.unit,
-      handled_by: transferForm.handledBy,
-      notes: transferForm.notes || 'Routine stock dispatch to POS counter',
-      status: 'Completed'
-    };
-
-    const updatedHistory = [newTransferRecord, ...transfersHistory];
-    setTransfersHistory(updatedHistory);
-    setStoredData('AGRO_ERP_WAREHOUSE_TRANSFERS', updatedHistory);
-
-    const msg = `Successfully transferred ${transferQty} ${targetStockItem.unit} of "${targetStockItem.product_name}" to POS Counter & Inventory!`;
-    setAlertSuccess(`✅ ${msg}`);
-
-    if (triggerNotificationToast) {
-      triggerNotificationToast('Stock Transferred to POS', `${transferQty} units added to POS Counter & Inventory`, 'success');
-    }
-
-    setTransferForm({
-      ...transferForm,
-      qty: '',
-      notes: ''
-    });
-
-    setTimeout(() => setActiveTab('history'), 900);
   };
 
   // ─── Handle Receive Stock from Purchases Submission ────────────────────────────
