@@ -55,6 +55,7 @@ const createPO = async (poData) => {
               product.batches[0].purchase_rate = Number(item.cost || item.rate);
             }
           }
+          product.markModified('batches');
           await product.save();
 
           await WarehouseStock.findOneAndUpdate(
@@ -101,6 +102,7 @@ const updatePOStatus = async (id, status, currentUser = null) => {
               selling_rate: product.retail_price
             });
           }
+          product.markModified('batches');
           await product.save();
 
           // Increment WarehouseStock warehouse_qty

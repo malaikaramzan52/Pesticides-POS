@@ -120,13 +120,19 @@ const processPOSSale = async (saleData, currentUser = null) => {
         }
       }
 
+      product.markModified('batches');
       await product.save();
 
       // Sync POS counter stock in WarehouseStock
       const totalStock = product.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
       await WarehouseStock.findOneAndUpdate(
         { product_id: product._id },
-        { pos_counter_qty: totalStock }
+        { 
+          product_name: product.name,
+          code: product.code,
+          pos_counter_qty: totalStock 
+        },
+        { upsert: true }
       );
     }
   }
@@ -273,14 +279,30 @@ const cancelSaleInvoice = async (invoiceId, cancelData, currentUser = null) => {
   // 1. Reverse Stock back to POS Counter
   for (const item of invoice.items) {
     const product = await Product.findById(item.product_id);
-    if (product && product.batches && product.batches.length > 0) {
-      product.batches[0].stock_qty += item.quantity;
+    if (product) {
+      if (product.batches && product.batches.length > 0) {
+        product.batches[0].stock_qty += item.quantity;
+      } else {
+        product.batches.push({
+          batch_no: item.batch_no || 'BATCH-001',
+          stock_qty: item.quantity,
+          purchase_rate: product.purchase_price || 0,
+          selling_rate: product.retail_price || 0
+        });
+      }
+      product.markModified('batches');
       await product.save();
+
+      await WarehouseStock.findOneAndUpdate(
+        { product_id: item.product_id },
+        { 
+          product_name: product.name,
+          code: product.code,
+          $inc: { pos_counter_qty: item.quantity } 
+        },
+        { upsert: true }
+      );
     }
-    await WarehouseStock.findOneAndUpdate(
-      { product_id: item.product_id },
-      { $inc: { pos_counter_qty: item.quantity } }
-    );
   }
 
   // 2. Mark Invoice as Cancelled
