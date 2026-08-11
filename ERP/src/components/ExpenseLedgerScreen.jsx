@@ -1,59 +1,93 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { BookOpen, Printer, Search, Eye, Edit3, X, CheckCircle2 } from 'lucide-react';
 import DateFilterBar from './DateFilterBar';
 import { isItemInDateRange } from '../utils/dateUtils';
 import { normalizeAccountName, getSupportedAccounts } from '../utils/accountUtils';
 import PrintHeader from './PrintHeader';
 import { useLanguage } from '../context/LanguageContext';
+import { expenseApi } from '../api';
 
 export default function ExpenseLedgerScreen({ expenses = [], setExpenses, triggerNotificationToast, dateFilter, setDateFilter }) {
   const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
+  const [dbExpenses, setDbExpenses] = useState([]);
   
   // Modals state
   const [viewExpense, setViewExpense] = useState(null);
   const [editExpense, setEditExpense] = useState(null);
 
+  useEffect(() => {
+    const fetchExpenses = async () => {
+      try {
+        const data = await expenseApi.getAll();
+        if (data && Array.isArray(data)) setDbExpenses(data);
+      } catch (e) {}
+    };
+    fetchExpenses();
+  }, []);
+
+  const allExpenses = useMemo(() => {
+    return (dbExpenses && dbExpenses.length > 0) ? dbExpenses : expenses;
+  }, [dbExpenses, expenses]);
+
   const ledgerData = useMemo(() => {
-    return [...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [expenses]);
+    return [...allExpenses].sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0));
+  }, [allExpenses]);
 
   const dateFilteredLedger = useMemo(() => {
-    return ledgerData.filter(row => isItemInDateRange(row.date, dateFilter.startDate, dateFilter.endDate));
+    return ledgerData.filter(row => isItemInDateRange(row.date || row.createdAt, dateFilter.startDate, dateFilter.endDate));
   }, [ledgerData, dateFilter]);
 
   const filteredLedger = useMemo(() => {
-    return dateFilteredLedger.filter(row => 
-      row.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      row.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      row.title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const q = (searchQuery || '').trim().toLowerCase();
+    return dateFilteredLedger.filter(row => {
+      if (!row) return false;
+      const idStr = String(row.exp_no || row.id || row._id || '').toLowerCase();
+      const catStr = String(row.category || '').toLowerCase();
+      const titleStr = String(row.title || row.name || row.notes || '').toLowerCase();
+      return !q || idStr.includes(q) || catStr.includes(q) || titleStr.includes(q);
+    });
   }, [dateFilteredLedger, searchQuery]);
 
-  const totalExpense = filteredLedger.reduce((sum, r) => sum + (r.status === 'Cancelled' ? 0 : r.amount), 0);
+  const totalExpense = filteredLedger.reduce((sum, r) => sum + (r.status === 'Cancelled' ? 0 : (r.amount || 0)), 0);
 
   const handlePrint = () => {
     window.print();
   };
 
-  const handleSaveEdit = (e) => {
+  const handleSaveEdit = async (e) => {
     e.preventDefault();
-    if (!editExpense.title.trim() || !editExpense.amount || parseFloat(editExpense.amount) <= 0) {
+    if (!editExpense || !editExpense.title?.trim() || !editExpense.amount || parseFloat(editExpense.amount) <= 0) {
       if (triggerNotificationToast) triggerNotificationToast('Error', 'Invalid expense data', 'error');
       return;
     }
 
-    setExpenses(prev => prev.map(exp => 
-      exp.id === editExpense.id ? {
-        ...exp,
-        title: editExpense.title,
-        category: editExpense.category,
-        payment_method: editExpense.payment_method,
-        amount: parseFloat(editExpense.amount),
-        notes: editExpense.notes,
-        status: editExpense.status
-      } : exp
-    ));
+    const targetId = editExpense._id || editExpense.id;
+    try {
+      if (targetId) {
+        await expenseApi.update(targetId, {
+          title: editExpense.title,
+          category: editExpense.category,
+          payment_method: editExpense.payment_method,
+          amount: parseFloat(editExpense.amount),
+          notes: editExpense.notes,
+          status: editExpense.status
+        });
+      }
+    } catch (err) {
+      console.error("Expense update error:", err);
+    }
+
+    try {
+      const freshData = await expenseApi.getAll();
+      if (freshData && Array.isArray(freshData)) setDbExpenses(freshData);
+    } catch (_) {}
+
+    if (setExpenses) {
+      setExpenses(prev => prev.map(exp => 
+        (exp._id === targetId || exp.id === targetId) ? { ...exp, ...editExpense, amount: parseFloat(editExpense.amount) } : exp
+      ));
+    }
     
     if (triggerNotificationToast) triggerNotificationToast('Success', 'Expense updated successfully', 'success');
     setEditExpense(null);
@@ -174,10 +208,10 @@ export default function ExpenseLedgerScreen({ expenses = [], setExpenses, trigge
                     <td colSpan="8" className="p-8 text-center text-gray-400 font-bold">No expenses found.</td>
                   </tr>
                 ) : (
-                  filteredLedger.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50 align-middle">
-                      <td className="p-3 font-bold text-gray-600">{row.date}</td>
-                      <td className="p-3 font-mono font-bold text-red-600">{row.id}</td>
+                  filteredLedger.map((row, idx) => (
+                    <tr key={row._id || row.id || `exp_${idx}`} className="hover:bg-gray-50 align-middle">
+                      <td className="p-3 font-bold text-gray-600">{row.date || row.createdAt?.split('T')[0]}</td>
+                      <td className="p-3 font-mono font-bold text-red-600">{row.exp_no || row.id || row._id || 'EXP-2026'}</td>
                       <td className="p-3 font-bold text-gray-700">
                         <span className="bg-gray-100 px-2 py-1 rounded text-gray-600">{row.category}</span>
                       </td>

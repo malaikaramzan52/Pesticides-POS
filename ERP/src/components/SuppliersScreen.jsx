@@ -86,12 +86,16 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
   const filteredVendors = useMemo(() => {
     return vendors.filter(v => {
       if (!v) return false;
-      const matchComp = !companySearch || (v.company_name || '').toLowerCase().includes(companySearch.toLowerCase()) || (v.city && v.city.toLowerCase().includes(companySearch.toLowerCase()));
-      const matchPerson = !personSearch || (v.contact_person || '').toLowerCase().includes(personSearch.toLowerCase());
-      const matchPhone = !phoneSearch || (v.phone || '').includes(phoneSearch);
+      const compName = (v.company_name || v.name || v.company || '');
+      const matchComp = !companySearch || compName.toLowerCase().includes(companySearch.trim().toLowerCase()) || (v.city && v.city.toLowerCase().includes(companySearch.trim().toLowerCase()));
+      const matchPerson = !personSearch || (v.contact_person || '').toLowerCase().includes(personSearch.trim().toLowerCase());
+      const matchPhone = !phoneSearch || (v.phone || '').includes(phoneSearch.trim());
       const matchStatus = !statusFilter || v.status === statusFilter;
-      const matchCity = selectedCity === 'All' || v.city === selectedCity;
-      const matchesDate = dateFilter.preset === 'All Time' || (v.last_purchase_date && v.last_purchase_date !== 'N/A' && isItemInDateRange(v.last_purchase_date, dateFilter.startDate, dateFilter.endDate));
+      const matchCity = !selectedCity || selectedCity === 'All' || (v.city || '').trim().toLowerCase() === selectedCity.trim().toLowerCase();
+      
+      const vendorDate = v.last_purchase_date || v.createdAt || v.date;
+      const matchesDate = !dateFilter || dateFilter.preset === 'All Time' || !dateFilter.startDate || !vendorDate || isItemInDateRange(vendorDate, dateFilter.startDate, dateFilter.endDate);
+
       return matchComp && matchPerson && matchPhone && matchStatus && matchCity && matchesDate;
     });
   }, [vendors, companySearch, personSearch, phoneSearch, statusFilter, selectedCity, dateFilter]);
