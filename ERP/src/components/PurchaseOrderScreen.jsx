@@ -17,8 +17,8 @@ import {
   Save,
   Truck,
 } from 'lucide-react';
-import { PRODUCTS, COMPANIES, getStoredData, setStoredData, saveProductsToStorage, getWarehouseStock } from '../utils/mockData';
-import { purchaseApi } from '../api';
+import { PRODUCTS, getStoredData, setStoredData, saveProductsToStorage, getWarehouseStock } from '../utils/mockData';
+import { purchaseApi, companyApi } from '../api';
 import DateFilterBar from './DateFilterBar';
 import { isItemInDateRange } from '../utils/dateUtils';
 import { useLanguage } from '../context/LanguageContext';
@@ -281,11 +281,21 @@ function CityDropdown({ value, onChange, placeholder, options }) {
 }
 
 // ── New Purchase Form ─────────────────────────────────────────────────────────
-function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast }) {
-  const defaultSupplier = COMPANIES[0]?.name || 'Syngenta Pakistan Ltd';
+function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast, companies = [] }) {
+  const defaultSupplier = companies[0]?.name || 'Syngenta Pakistan Ltd';
   const defaultProd = PRODUCTS[0] || { id: 'PRD-001', name: 'Glyphosate 41% SL', batches: [{ purchase_rate: 350 }] };
 
   const [supplier, setSupplier]          = useState(defaultSupplier);
+  
+  useEffect(() => {
+    if (companies && companies.length > 0 && (supplier === 'Syngenta Pakistan Ltd' || !supplier)) {
+      const hasSyngenta = companies.some(c => c.name === 'Syngenta Pakistan Ltd');
+      if (!hasSyngenta) {
+        setSupplier(companies[0].name);
+      }
+    }
+  }, [companies]);
+
   const [cart,     setCart]              = useState([]);
   const [prodId,   setProdId]            = useState(defaultProd?.id || 'PRD-001');
   const [customName, setCustomName]      = useState('');
@@ -406,7 +416,11 @@ function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast }) {
           value={supplier} onChange={e => setSupplier(e.target.value)}
           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-800 bg-white focus:border-green-500 focus:ring-2 focus:ring-green-500/10 focus:outline-none transition"
         >
-          {COMPANIES.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          {companies && companies.length > 0 ? (
+            companies.map(c => <option key={c._id || c.id} value={c.name}>{c.name}</option>)
+          ) : (
+            <option value="Syngenta Pakistan Ltd">Syngenta Pakistan Ltd</option>
+          )}
         </select>
       </div>
 
@@ -669,9 +683,9 @@ const addPOItemsToWarehouse = (po) => {
 };
 
 // Helper to resolve vendor city dynamically
-const getSupplierCity = (supplierName) => {
+const getSupplierCity = (supplierName, companiesList = []) => {
   if (!supplierName) return '';
-  const comp = COMPANIES.find(c => c.name.toLowerCase() === supplierName.toLowerCase() || supplierName.toLowerCase().includes(c.name.toLowerCase()));
+  const comp = (companiesList || []).find(c => c.name.toLowerCase() === supplierName.toLowerCase() || supplierName.toLowerCase().includes(c.name.toLowerCase()));
   return comp?.city || '';
 };
 
@@ -679,6 +693,7 @@ const getSupplierCity = (supplierName) => {
 export default function PurchasesScreen({ triggerNotificationToast, addAuditLog, dateFilter, setDateFilter, selectedCity, setSelectedCity, cities = [] }) {
   const { t } = useLanguage();
   const [poList, setPoList] = useState(INIT_PO_LIST);
+  const [companies, setCompanies] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [viewPO, setViewPO] = useState(null);
@@ -691,7 +706,14 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
         if (data && Array.isArray(data) && data.length > 0) setPoList(data);
       } catch (e) {}
     };
+    const fetchCompanies = async () => {
+      try {
+        const data = await companyApi.getAll();
+        if (data && Array.isArray(data)) setCompanies(data);
+      } catch (e) {}
+    };
     fetchPOs();
+    fetchCompanies();
   }, []);
 
   const dateFilteredPOs = useMemo(() => {
@@ -700,10 +722,10 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
       const poDate = po.date || po.createdAt || '2026-08-01';
       const supplierName = po.supplier || po.supplier_name || po.vendor_id?.company_name || '—';
       const matchesDate = isItemInDateRange(poDate, dateFilter.startDate, dateFilter.endDate);
-      const matchesCity = selectedCity === 'All' || getSupplierCity(supplierName) === selectedCity;
+      const matchesCity = selectedCity === 'All' || getSupplierCity(supplierName, companies) === selectedCity;
       return matchesDate && matchesCity;
     });
-  }, [poList, dateFilter, selectedCity]);
+  }, [poList, dateFilter, selectedCity, companies]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -820,7 +842,7 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
 
 
       {/* New Purchase Form */}
-      {showForm && <NewPurchasePanel onSave={handleSavePO} onCancel={() => setShowForm(false)} triggerNotificationToast={triggerNotificationToast} />}
+      {showForm && <NewPurchasePanel onSave={handleSavePO} onCancel={() => setShowForm(false)} triggerNotificationToast={triggerNotificationToast} companies={companies} />}
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col sm:flex-row items-center gap-3">
