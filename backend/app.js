@@ -8,34 +8,20 @@ const routes = require('./routes');
 
 const app = express();
 
-// Security HTTP headers
-app.use(helmet());
-
-// CORS configuration — allow Vercel frontend + local dev
-const ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://pesticides-pos.vercel.app',
-  // Allow any vercel.app preview deploy
-  /^https:\/\/pesticides-pos.*\.vercel\.app$/,
-];
-
+// CORS configuration — allow requests cleanly with credentials
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (curl, Postman, mobile apps)
-    if (!origin) return callback(null, true);
-    // Allow if CORS_ORIGIN is wildcard
-    if (env.corsOrigin === '*') return callback(null, true);
-    // Check against allowed list
-    const allowed = ALLOWED_ORIGINS.some((o) =>
-      typeof o === 'string' ? o === origin : o.test(origin)
-    );
-    if (allowed) return callback(null, true);
-    return callback(new Error(`CORS: origin ${origin} not allowed`));
-  },
+  origin: true, // Reflect request origin to allow any origin dynamically
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-passcode'],
+}));
+
+// Explicitly handle preflight OPTIONS for all routes
+app.options('*', cors());
+
+// Security HTTP headers
+app.use(helmet({
+  crossOriginResourcePolicy: false,
 }));
 
 // Body parsing middleware

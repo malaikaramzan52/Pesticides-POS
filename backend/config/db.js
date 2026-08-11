@@ -2,37 +2,45 @@ const mongoose = require('mongoose');
 const dns      = require('dns');
 const env      = require('./env');
 
-// Fix: System DNS may block SRV lookups needed by mongodb+srv://
-// Force Google/Cloudflare public DNS resolvers for reliable Atlas connection
-dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+// Safely attempt setting custom DNS servers (needed in some local Windows environments)
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+} catch (e) {
+  console.log('[DNS] Custom DNS setServers skipped:', e.message);
+}
 
-let isConnected = false;
+let isConnecting = false;
 
 const connectDB = async () => {
-  if (isConnected) return;
-
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 3000;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const conn = await mongoose.connect(env.mongoUri, {
-        serverSelectionTimeoutMS: 15000,
-        connectTimeoutMS: 15000,
-      });
-      isConnected = true;
-      console.log(`[MongoDB] ✅ Connected to: ${conn.connection.host}`);
-      return;
-    } catch (error) {
-      console.error(`[MongoDB] ❌ Attempt ${attempt}/${MAX_RETRIES} failed: ${error.message}`);
-      if (attempt < MAX_RETRIES) {
-        console.log(`[MongoDB] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
-        await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
-      } else {
-        console.error('[MongoDB] All retries exhausted — exiting.');
-        process.exit(1);
-      }
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+  if (isConnecting) {
+    // Wait until existing connection attempt finishes
+    let checks = 0;
+    while (isConnecting && checks < 30) {
+      await new Promise((res) => setTimeout(res, 500));
+      if (mongoose.connection.readyState === 1) return;
+      checks++;
     }
+  }
+
+  isConnecting = true;
+
+  try {
+    const conn = await mongoose.connect(env.mongoUri, {
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+    });
+    console.log(`[MongoDB] ✅ Connected to: ${conn.connection.host}`);
+  } catch (error) {
+    console.error(`[MongoDB] ❌ Connection error: ${error.message}`);
+    // Do not call process.exit in serverless environment to prevent crashing the worker
+    if (!process.env.VERCEL) {
+      process.exit(1);
+    }
+  } finally {
+    isConnecting = false;
   }
 };
 
