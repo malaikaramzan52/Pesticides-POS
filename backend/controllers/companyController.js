@@ -15,8 +15,9 @@ const createCompany = async (req, res, next) => {
   try {
     const count = await Company.countDocuments();
     const code = req.body.code || `CMP-00${count + 1}`;
+    const { _id, id, ...createData } = req.body;
 
-    const company = await Company.create({ ...req.body, code });
+    const company = await Company.create({ ...createData, code });
     return successResponse(res, 'Company created successfully', company, 201);
   } catch (error) {
     next(error);
@@ -25,7 +26,8 @@ const createCompany = async (req, res, next) => {
 
 const updateCompany = async (req, res, next) => {
   try {
-    const company = await Company.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { _id, id, createdAt, updatedAt, ...updateData } = req.body;
+    const company = await Company.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!company) throw new ApiError(404, 'Company not found');
     return successResponse(res, 'Company updated successfully', company);
   } catch (error) {
