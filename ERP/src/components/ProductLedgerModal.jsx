@@ -18,12 +18,21 @@ export default function ProductLedgerModal({ product, onClose, triggerNotificati
   const movements = useMemo(() => getStoredData('AGRO_ERP_STOCK_MOVEMENTS', []), []);
 
   // Helpers
-  const company = useMemo(() => COMPANIES.find(c => c.id === product.company_id), [product]);
-  const category = useMemo(() => CATEGORIES.find(c => c.id === product.category_id), [product]);
+  const company = useMemo(() => {
+    const pCompId = product.company_id?._id || product.company_id?.id || product.company_id || '';
+    return COMPANIES.find(c => (c._id || c.id || '').toString() === pCompId.toString());
+  }, [product]);
+
+  const category = useMemo(() => {
+    const pCatId = product.category_id?._id || product.category_id?.id || product.category_id || '';
+    return CATEGORIES.find(c => (c._id || c.id || '').toString() === pCatId.toString());
+  }, [product]);
 
   // Matching check helper (fuzzy matching names or matching product_id)
   const isProductMatch = (productId, itemName) => {
-    if (productId && productId === product.id) return true;
+    const targetProdId = (product._id || product.id || '').toString();
+    const currentProdId = (productId?._id || productId || productId?.id || '').toString();
+    if (currentProdId && currentProdId === targetProdId) return true;
     if (!itemName) return false;
     const target = product.name.toLowerCase();
     const current = itemName.toLowerCase();

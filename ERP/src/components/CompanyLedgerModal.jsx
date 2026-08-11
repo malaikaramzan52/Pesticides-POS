@@ -41,11 +41,20 @@ export default function CompanyLedgerModal({ company, invoices = [], onClose, se
 
   // Link products belonging to this company
   const companyProducts = useMemo(() => {
-    return PRODUCTS.filter(p => p.company_id === company.id || (p.company_name && p.company_name.toLowerCase() === company.name.toLowerCase()));
+    const targetCompId = (company._id || company.id || '').toString();
+    const targetCompName = (company.name || '').toLowerCase().trim();
+    return PRODUCTS.filter(p => {
+      const pCompId = p.company_id?._id || p.company_id?.id || p.company_id || '';
+      if (pCompId.toString() === targetCompId) return true;
+      const pCompName = typeof p.company_id === 'object' ? p.company_id?.name : '';
+      if (pCompName && pCompName.toLowerCase().trim() === targetCompName) return true;
+      if (p.company_name && p.company_name.toLowerCase().trim() === targetCompName) return true;
+      return false;
+    });
   }, [company]);
 
-  const companyProductIds = useMemo(() => new Set(companyProducts.map(p => p.id)), [companyProducts]);
-  const companyProductNames = useMemo(() => new Set(companyProducts.map(p => p.name)), [companyProducts]);
+  const companyProductIds = useMemo(() => new Set(companyProducts.map(p => (p._id || p.id || '').toString())), [companyProducts]);
+  const companyProductNames = useMemo(() => new Set(companyProducts.map(p => (p.name || '').toLowerCase().trim())), [companyProducts]);
 
   // ─── Filtered Data sets ───────────────────────────────────────────────────────
   
@@ -63,10 +72,11 @@ export default function CompanyLedgerModal({ company, invoices = [], onClose, se
       if (inv.status === 'Cancelled') return;
       if (!isItemInDateRange(inv.date, dateFilter.startDate, dateFilter.endDate)) return;
       
-      const companyItems = (inv.items || inv.cart || []).filter(item => 
-        companyProductIds.has(item.product_id) || 
-        (item.product_name && companyProductNames.has(item.product_name))
-      );
+      const companyItems = (inv.items || inv.cart || []).filter(item => {
+        const itemId = (item.product_id?._id || item.product_id || item.product_id?.id || '').toString();
+        const itemName = (item.product_name || item.name || '').toLowerCase().trim();
+        return companyProductIds.has(itemId) || (itemName && companyProductNames.has(itemName));
+      });
       if (companyItems.length > 0) {
         rows.push({
           ...inv,
