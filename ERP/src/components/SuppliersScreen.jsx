@@ -55,7 +55,18 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
     const fetchVendors = async () => {
       try {
         const data = await vendorApi.getAll();
-        if (data && Array.isArray(data) && data.length > 0) setVendors(data);
+        if (data && Array.isArray(data) && data.length > 0) {
+          const normalized = data.map((v, idx) => {
+            const code = v.code || v.vendor_code || (v._id ? `VDR-2026-${String(v._id).slice(-3).toUpperCase()}` : `VDR-2026-${String(idx + 1).padStart(3, '0')}`);
+            return {
+              ...v,
+              id: code,
+              code: code,
+              company_name: v.company_name || v.name || v.company || ''
+            };
+          });
+          setVendors(normalized);
+        }
       } catch (e) {}
     };
     const fetchCompanies = async () => {
@@ -148,13 +159,27 @@ export default function SuppliersScreen({ selectedCity, setSelectedCity, cities 
 
       if (vendorFormModal.mode === 'add') {
         const created = await vendorApi.create(payload);
-        setVendors(prev => [created || payload, ...prev]);
+        const resolvedCode = created?.code || payload.code || `VDR-2026-${String(Math.floor(100 + Math.random() * 900))}`;
+        const normalizedCreated = {
+          ...(created || payload),
+          id: resolvedCode,
+          code: resolvedCode,
+          company_name: payload.company_name
+        };
+        setVendors(prev => [normalizedCreated, ...prev]);
       } else {
         const targetId = savedVendorData._id || savedVendorData.id;
         const updated = await vendorApi.update(targetId, payload);
-        setVendors(prev => prev.map(v => (v._id === targetId || v.id === targetId) ? (updated || payload) : v));
-        if (selectedVendorForView && (selectedVendorForView._id === targetId || selectedVendorForView.id === targetId)) {
-          setSelectedVendorForView(prev => ({ ...prev, ...payload }));
+        const resolvedCode = updated?.code || savedVendorData.code || savedVendorData.id;
+        const normalizedUpdated = {
+          ...(updated || payload),
+          id: resolvedCode,
+          code: resolvedCode,
+          company_name: payload.company_name
+        };
+        setVendors(prev => prev.map(v => (v._id === targetId || v.id === targetId || v.code === targetId) ? normalizedUpdated : v));
+        if (selectedVendorForView && (selectedVendorForView._id === targetId || selectedVendorForView.id === targetId || selectedVendorForView.code === targetId)) {
+          setSelectedVendorForView(normalizedUpdated);
         }
       }
       setVendorFormModal({ open: false, mode: 'add', vendor: null });
