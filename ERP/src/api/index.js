@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+// Strip trailing slashes, ensure /api/v1 is present
+const _raw = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1').replace(/\/+$/, '');
+const API_BASE_URL = _raw.endsWith('/api/v1') ? _raw : `${_raw}/api/v1`;
 
 const getHeaders = () => {
   const headers = {
