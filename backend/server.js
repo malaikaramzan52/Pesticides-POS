@@ -1,3 +1,4 @@
+// Pesticides POS Backend — v1.0.1
 const app = require('./app');
 const connectDB = require('./config/db');
 const env = require('./config/env');
