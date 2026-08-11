@@ -1,0 +1,23 @@
+{
+  "name": "pesticides-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pesticides & Agro POS — Monorepo (Backend + ERP Frontend)",
+  "workspaces": [
+    "backend",
+    "ERP"
+  ],
+  "scripts": {
+    "dev": "npm run dev:backend & npm run dev:erp",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:erp": "npm run dev --workspace=ERP",
+    "install:all": "npm install --workspaces",
+    "build:erp": "npm run build --workspace=ERP",
+    "start:backend": "npm run start --workspace=backend",
+    "lint:erp": "npm run lint --workspace=ERP"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
