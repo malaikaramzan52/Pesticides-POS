@@ -118,8 +118,31 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
       return;
     }
 
-    // In this specific flow, as requested by user, we only return the price and DO NOT increment the stock back.
-    // So the stock increment logic has been removed.
+    // Update local PRODUCTS and WarehouseStock mock data for consistency
+    const currentWarehouseStock = typeof getWarehouseStock === 'function' ? getWarehouseStock() : [];
+    let updatedWarehouseStock = JSON.parse(JSON.stringify(currentWarehouseStock));
+
+    returnedItems.forEach(item => {
+      const p = PRODUCTS.find(prod => prod.id === (item.product_id || item.product?.id || item.product?._id) || prod.name === item.product_name);
+      if (p) {
+        if (!p.batches || p.batches.length === 0) {
+          p.batches = [{ id: `B_${Date.now()}`, batch_no: item.batch_no || 'DEFAULT', stock_qty: item.returnQty }];
+        } else {
+          const targetBatch = p.batches.find(b => b.batch_no === item.batch_no) || p.batches[0];
+          targetBatch.stock_qty = (targetBatch.stock_qty || 0) + item.returnQty;
+        }
+        
+        // Sync WarehouseStock pos_counter_qty
+        const totalStock = p.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
+        const whIdx = updatedWarehouseStock.findIndex(w => w.product_id === p.id);
+        if (whIdx >= 0) {
+          updatedWarehouseStock[whIdx].pos_counter_qty = totalStock;
+        }
+      }
+    });
+
+    setStoredData('AGRO_ERP_WAREHOUSE_STOCK', updatedWarehouseStock);
+    saveProductsToStorage();
 
     const rec = {
       id: `SR${Date.now()}`,
@@ -150,7 +173,7 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
     onReturnSaved(rec);
 
     if (addAuditLog) {
-      addAuditLog('Sales Return Processed', `Processed refund for Invoice ${loadedInvoice.invoice_no}. Refunded Rs. ${refundTotal.toLocaleString()}. No stock was added.`);
+      addAuditLog('Sales Return Processed', `Processed refund for Invoice ${loadedInvoice.invoice_no}. Refunded Rs. ${refundTotal.toLocaleString()}. Stock successfully updated.`);
     }
 
     if (triggerNotificationToast) {
@@ -185,7 +208,7 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-4 py-3 rounded-xl">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={15} /> 
-            <span>✅ Return processed! Refund of Rs. {success.refund_total.toLocaleString()} issued via {success.refund_method}. (Stock was not altered)</span>
+            <span>✅ Return processed! Refund of Rs. {success.refund_total.toLocaleString()} issued via {success.refund_method}. Stock successfully updated.</span>
           </div>
           <button 
             onClick={() => {

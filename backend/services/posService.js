@@ -234,6 +234,45 @@ const processSalesReturn = async (returnData, currentUser = null) => {
   const invoice = await SaleInvoice.findOne({ invoice_no });
   if (!invoice) throw new ApiError(404, `Invoice "${invoice_no}" not found`);
 
+  // 1. Restore stock to Product batches and WarehouseStock pos_counter_qty in MongoDB
+  if (items && Array.isArray(items)) {
+    for (const item of items) {
+      const pId = item.product_id;
+      const qty = Number(item.quantity) || 0;
+      if (qty > 0 && pId) {
+        const product = await Product.findById(pId);
+        if (product) {
+          if (product.batches && product.batches.length > 0) {
+            product.batches[0].stock_qty += qty;
+          } else {
+            product.batches.push({
+              batch_no: item.batch_no || 'BATCH-RETURNED',
+              stock_qty: qty,
+              mfg_date: 'N/A',
+              expiry_date: 'N/A',
+              purchase_rate: product.purchase_price || 0,
+              selling_rate: product.retail_price || 0
+            });
+          }
+          product.markModified('batches');
+          await product.save();
+
+          // Sync POS counter stock in WarehouseStock
+          const totalStock = product.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
+          await WarehouseStock.findOneAndUpdate(
+            { product_id: product._id },
+            { 
+              product_name: product.name,
+              code: product.code,
+              pos_counter_qty: totalStock 
+            },
+            { upsert: true }
+          );
+        }
+      }
+    }
+  }
+
   const returnRecord = await SalesReturn.create({
     return_no: `SR${Date.now()}`,
     date: new Date().toISOString().split('T')[0],
@@ -248,7 +287,7 @@ const processSalesReturn = async (returnData, currentUser = null) => {
 
   await auditService.logAction(
     'Sales Return Processed',
-    `Processed refund for Invoice ${invoice_no}. Refunded Rs. ${refund_total}.`,
+    `Processed refund for Invoice ${invoice_no}. Refunded Rs. ${refund_total}. Stock and value updated.`,
     currentUser ? currentUser.name : 'Admin'
   );
 
