@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import PrintHeader from './PrintHeader';
 import { PRODUCTS, COMPANIES, getStoredData, setStoredData, saveProductsToStorage, getWarehouseStock } from '../utils/mockData';
-import { salesApi, purchaseApi, customerApi, vendorApi } from '../api';
+import { salesApi, purchaseApi, customerApi, vendorApi, companyApi } from '../api';
 import PaymentProcessor from './PaymentProcessor';
 import DateFilterBar from './DateFilterBar';
 import { useLanguage } from '../context/LanguageContext';

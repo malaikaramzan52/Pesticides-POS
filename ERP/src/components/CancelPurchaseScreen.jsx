@@ -33,9 +33,10 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
 
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase();
-    return dateFilteredPOs.filter(po =>
-      (!q || po.id.toLowerCase().includes(q) || (po.supplier || '').toLowerCase().includes(q))
-    );
+    return dateFilteredPOs.filter(po => {
+      const poId = po.po_no || po.po_number || po.id || po._id || '';
+      return (!q || poId.toLowerCase().includes(q) || (po.supplier || '').toLowerCase().includes(q));
+    });
   }, [dateFilteredPOs, searchQuery]);
 
   const handleCancelClick = (po) => {
@@ -87,12 +88,14 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
     setPoList(updatedPoList);
     setStoredData('AGRO_ERP_PURCHASE_ORDERS', updatedPoList);
 
+    const poDisplayNum = cancelModal.po_no || cancelModal.po_number || cancelModal.id;
+
     if (addAuditLog) {
-      addAuditLog(isReverseMode ? 'Reverse Receipt' : 'Cancel Purchase', `${isReverseMode ? 'Reversed' : 'Cancelled'} PO ${cancelModal.id}. Reason: ${cancelReason}`);
+      addAuditLog(isReverseMode ? 'Reverse Receipt' : 'Cancel Purchase', `${isReverseMode ? 'Reversed' : 'Cancelled'} PO ${poDisplayNum}. Reason: ${cancelReason}`);
     }
 
     if (triggerNotificationToast) {
-      triggerNotificationToast(isReverseMode ? 'Receipt Reversed' : 'Purchase Cancelled', `PO ${cancelModal.id} ${isReverseMode ? 'reversed' : 'cancelled'} successfully.`, 'success');
+      triggerNotificationToast(isReverseMode ? 'Receipt Reversed' : 'Purchase Cancelled', `PO ${poDisplayNum} ${isReverseMode ? 'reversed' : 'cancelled'} successfully.`, 'success');
     }
 
     setCancelModal(null);
@@ -135,12 +138,12 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtered.map(po => {
+            {filtered.map((po, idx) => {
               const isActionDisabled = po.status === 'Cancelled' || po.status === 'Returned';
               const isReceived = po.status === 'Received';
               return (
-                <tr key={po.id} className="hover:bg-gray-50/60 transition">
-                  <td className="py-3 px-4 font-mono font-bold text-gray-700 whitespace-nowrap">{po.id}</td>
+                <tr key={po._id || po.id || po.po_no || `po_${idx}`} className="hover:bg-gray-50/60 transition">
+                  <td className="py-3 px-4 font-mono font-bold text-gray-700 whitespace-nowrap">{po.po_no || po.po_number || po.id || 'PO-2026'}</td>
                   <td className="py-3 px-4 font-semibold text-gray-900 whitespace-nowrap">{po.supplier}</td>
                   <td className="py-3 px-4 text-left font-medium text-gray-800">
                     <div className="space-y-1">
@@ -156,7 +159,7 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
                     </div>
                   </td>
                   <td className="py-3 px-4 font-medium text-gray-600 whitespace-nowrap hidden sm:table-cell">{po.date}</td>
-                  <td className="py-3 px-4 text-right font-black text-gray-800 whitespace-nowrap">{po.total.toLocaleString()}</td>
+                  <td className="py-3 px-4 text-right font-black text-gray-800 whitespace-nowrap">{po.total?.toLocaleString()}</td>
                   <td className="py-3 px-4 text-center">
                     {po.status === 'Cancelled' || po.status === 'Returned' ? (
                       <span className="px-2 py-0.5 bg-red-100 text-red-700 border border-red-200 rounded-full text-[9px] font-bold">{po.status}</span>
@@ -198,7 +201,7 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
           <div className="bg-white rounded-2xl w-full max-w-md border border-gray-200 shadow-2xl p-6">
             <h2 className="text-lg font-black text-gray-900 mb-2 flex items-center gap-2">
               <Ban className={isReverseMode ? "text-orange-500" : "text-red-500"} /> 
-              {isReverseMode ? 'Reverse Receipt' : 'Cancel Purchase'} {cancelModal.id}
+              {isReverseMode ? 'Reverse Receipt' : 'Cancel Purchase'} {cancelModal.po_no || cancelModal.po_number || cancelModal.id}
             </h2>
             <p className="text-xs text-gray-500 mb-4">
               {isReverseMode 
@@ -213,7 +216,7 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
                 value={cancelReason}
                 onChange={e => setCancelReason(e.target.value)}
                 placeholder="Enter a reason..."
-                className="w-full rounded-lg border border-gray-300 p-3 text-xs focus:border-red-500 focus:ring-2 focus:ring-red-500/10 focus:outline-none transition resize-none"
+                className="w-full rounded-lg border border-red-300 p-3 text-xs focus:border-red-500 focus:ring-2 focus:ring-red-500/10 focus:outline-none transition resize-none"
               ></textarea>
             </div>
             <div className="flex gap-2 justify-end">
@@ -242,7 +245,7 @@ export default function CancelPurchaseScreen({ currentUser, addAuditLog, trigger
               <div className="grid grid-cols-2 gap-6 bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <div className="space-y-3">
                   <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b pb-1 mb-2">Purchase Information</h3>
-                  <div className="flex gap-2"><span className="w-32 whitespace-nowrap font-bold text-gray-500">Purchase Order :</span><span className="font-mono font-bold text-gray-900">{viewDetailsModal.id}</span></div>
+                  <div className="flex gap-2"><span className="w-32 whitespace-nowrap font-bold text-gray-500">Purchase Order :</span><span className="font-mono font-bold text-gray-900">{viewDetailsModal.po_no || viewDetailsModal.po_number || viewDetailsModal.id}</span></div>
                   <div className="flex gap-2"><span className="w-32 whitespace-nowrap font-bold text-gray-500">Supplier :</span><span className="font-semibold">{viewDetailsModal.supplier}</span></div>
                   <div className="flex gap-2"><span className="w-32 whitespace-nowrap font-bold text-gray-500">Purchase Date :</span><span>{viewDetailsModal.date}</span></div>
                   <div className="flex gap-2"><span className="w-32 whitespace-nowrap font-bold text-gray-500">Total Amount :</span><span className="font-black text-gray-800">Rs. {viewDetailsModal.total.toLocaleString()}</span></div>

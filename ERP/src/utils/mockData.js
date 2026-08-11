@@ -1,6 +1,11 @@
 // Mock Data for Pesticides & Agro Chemicals Wholesaler ERP POS
 
-export const COMPANIES = [];
+export const COMPANIES = [
+  { id: 'C1', name: 'Syngenta Pakistan Ltd', company_type: 'Manufacturer' },
+  { id: 'C2', name: 'Bayer CropScience', company_type: 'Manufacturer' },
+  { id: 'C3', name: 'FMC United', company_type: 'Manufacturer' },
+  { id: 'C4', name: 'Tareen Farm', company_type: 'Distributor' }
+];
 
 export const CATEGORIES = [];
 
