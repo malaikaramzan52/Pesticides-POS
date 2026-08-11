@@ -163,20 +163,41 @@ export default function ReportsScreen({ invoices = [], expenses = [], defaultTab
   // Filter purchase orders by date range and selected city
   const validPurchases = useMemo(() => {
     return purchaseOrders.filter(po => {
-      const matchesDate = isItemInDateRange(po.date, dateFilter.startDate, dateFilter.endDate);
-      const matchesCity = selectedCity === 'All' || getSupplierCity(po.supplier) === selectedCity;
+      const poDate = po.date || po.createdAt;
+      const matchesDate = isItemInDateRange(poDate, dateFilter.startDate, dateFilter.endDate);
+      const matchesCity = !selectedCity || selectedCity === 'All' || (po.supplier_city || getSupplierCity(po.supplier)).toLowerCase() === selectedCity.toLowerCase();
       return po.status !== 'Cancelled' && matchesDate && matchesCity;
     });
   }, [purchaseOrders, dateFilter, selectedCity]);
 
+  const totalProcurementValue = useMemo(() => {
+    return validPurchases.reduce((sum, po) => sum + (Number(po.total) || 0), 0);
+  }, [validPurchases]);
+
+  const supplierBreakdown = useMemo(() => {
+    const map = new Map();
+    validPurchases.forEach(po => {
+      const sName = po.supplier || po.company_name || 'Unknown Supplier';
+      const key = sName.trim().toLowerCase();
+      const existing = map.get(key) || { name: sName, ordersCount: 0, totalValue: 0, returnedValue: 0 };
+      existing.ordersCount += 1;
+      existing.totalValue += (Number(po.total) || 0);
+      existing.returnedValue += (Number(po.total_returned_amount) || 0);
+      map.set(key, existing);
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalValue - a.totalValue);
+  }, [validPurchases]);
+
   // Actual Purchase returns filtered by date and city
   const actualPurchaseReturns = useMemo(() => {
-    return returnRecords.filter(r => 
+    const poReturnsTotal = validPurchases.reduce((sum, po) => sum + (Number(po.total_returned_amount) || 0), 0);
+    const recReturnsTotal = returnRecords.filter(r => 
       r.type === 'Purchase Return' && 
       filterByDate(r.date) && 
-      (selectedCity === 'All' || getSupplierCity(r.supplier) === selectedCity)
+      (!selectedCity || selectedCity === 'All' || getSupplierCity(r.supplier) === selectedCity)
     ).reduce((sum, r) => sum + (r.refund_total || r.total || r.amount || 0), 0);
-  }, [returnRecords, dateFilter, selectedCity]);
+    return Math.max(poReturnsTotal, recReturnsTotal);
+  }, [validPurchases, returnRecords, dateFilter, selectedCity]);
 
   // Expenses for Expense Report — show all expenses (Paid + Pending) for full visibility
   const paidExpenses = liveExpenses.filter(e => {
@@ -357,16 +378,16 @@ export default function ReportsScreen({ invoices = [], expenses = [], defaultTab
       {/* 2. PURCHASE REPORT TAB */}
       {activeTab === 'purchase' && (
         <div className="space-y-6 animate-in fade-in duration-150 text-xs font-sans">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl">
               <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block">Total Procurement Value</span>
-              <span className="text-2xl font-black text-amber-900 mt-1 block">Rs. {validPurchases.reduce((sum, po) => sum + po.total, 0).toLocaleString()}</span>
+              <span className="text-2xl font-black text-amber-900 mt-1 block">Rs. {totalProcurementValue.toLocaleString()}</span>
               <span className="text-[10px] text-amber-700 font-semibold">Stock Inward Purchases ({dateFilter.preset})</span>
             </div>
 
             <div className="bg-gray-50 border border-gray-200 p-4 rounded-2xl">
               <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block">Procured Suppliers</span>
-              <span className="text-2xl font-black text-gray-800 mt-1 block">{new Set(validPurchases.map(po => po.supplier)).size} Suppliers</span>
+              <span className="text-2xl font-black text-gray-800 mt-1 block">{supplierBreakdown.length} Suppliers</span>
               <span className="text-[10px] text-gray-500 font-semibold">Active supplier manufacturers in range</span>
             </div>
 
@@ -375,8 +396,15 @@ export default function ReportsScreen({ invoices = [], expenses = [], defaultTab
               <span className="text-2xl font-black text-red-600 mt-1 block">Rs. {actualPurchaseReturns.toLocaleString()}</span>
               <span className="text-[10px] text-gray-500 font-semibold">Damaged or Expiry Returns</span>
             </div>
+
+            <div className="bg-green-50 border border-green-200 p-4 rounded-2xl">
+              <span className="text-[10px] font-extrabold text-green-800 uppercase tracking-wider block">Net Procurement Value</span>
+              <span className="text-2xl font-black text-green-900 mt-1 block">Rs. {Math.max(0, totalProcurementValue - actualPurchaseReturns).toLocaleString()}</span>
+              <span className="text-[10px] text-green-700 font-semibold">Purchases minus Returns</span>
+            </div>
           </div>
 
+          {/* Supplier Breakdown Table */}
           <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
             <div className="bg-gray-50 px-4 py-3 border-b font-extrabold text-gray-700 uppercase tracking-wide text-xs">
               Supplier-Wise Purchase Breakdown
@@ -387,25 +415,90 @@ export default function ReportsScreen({ invoices = [], expenses = [], defaultTab
                   <th className="py-2.5 px-4">Supplier Name</th>
                   <th className="py-2.5 px-4">Primary Category</th>
                   <th className="py-2.5 px-4 text-center">Orders Received</th>
-                  <th className="py-2.5 px-4 text-right">Total Purchased Value</th>
+                  <th className="py-2.5 px-4 text-right">Gross Purchase</th>
+                  <th className="py-2.5 px-4 text-right">Returns</th>
+                  <th className="py-2.5 px-4 text-right">Net Value</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {COMPANIES.filter(c => selectedCity === 'All' || getSupplierCity(c.name) === selectedCity).map((c, i) => {
-                  const companyPOs = validPurchases.filter(po => po.supplier.toLowerCase().includes(c.name.toLowerCase()));
-                  const val = companyPOs.reduce((sum, po) => sum + po.total, 0);
-                  const ordersCount = companyPOs.length;
-                  return (
-                    <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="py-3 px-4 font-bold text-gray-800">{c.name}</td>
+                {supplierBreakdown.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="py-8 text-center text-gray-400 font-medium">No purchase records found for this period.</td>
+                  </tr>
+                ) : (
+                  supplierBreakdown.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="py-3 px-4 font-bold text-gray-800">{item.name}</td>
                       <td className="py-3 px-4 text-gray-500 font-medium">Agro Chemicals / Fertilizers</td>
-                      <td className="py-3 px-4 text-center font-semibold">{ordersCount} Orders</td>
-                      <td className="py-3 px-4 text-right font-black text-gray-900">Rs. {val.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-center font-semibold">{item.ordersCount} Orders</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-700">Rs. {item.totalValue.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-medium text-red-600">
+                        {item.returnedValue > 0 ? `Rs. ${item.returnedValue.toLocaleString()}` : '—'}
+                      </td>
+                      <td className="py-3 px-4 text-right font-black text-gray-900">
+                        Rs. {(item.totalValue - item.returnedValue).toLocaleString()}
+                      </td>
                     </tr>
-                  );
-                })}
+                  ))
+                )}
               </tbody>
             </table>
+          </div>
+
+          {/* Recent Purchase Orders Transaction Log */}
+          <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+            <div className="bg-gray-50 px-4 py-3 border-b font-extrabold text-gray-700 uppercase tracking-wide text-xs">
+              Recent Purchase Orders Transaction Log
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-gray-100 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-4">Date</th>
+                    <th className="py-2.5 px-4">PO #</th>
+                    <th className="py-2.5 px-4">Supplier</th>
+                    <th className="py-2.5 px-4 text-center">Inward Status</th>
+                    <th className="py-2.5 px-4 text-center">Payment Mode</th>
+                    <th className="py-2.5 px-4 text-right">Total Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {validPurchases.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="py-8 text-center text-gray-400 font-medium">No purchase transactions found.</td>
+                    </tr>
+                  ) : (
+                    validPurchases.slice().reverse().map((po, idx) => (
+                      <tr key={po._id || po.id || idx} className="hover:bg-gray-50/50 transition">
+                        <td className="py-2.5 px-4 font-medium text-gray-600">{po.date || po.createdAt?.split('T')[0]}</td>
+                        <td className="py-2.5 px-4 font-bold text-amber-700 font-mono">
+                          {po.po_no || po.po_number || po.id}
+                          {po.return_status && po.return_status !== 'None' && (
+                            <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded uppercase font-bold border border-orange-200">
+                              {po.return_status} Return
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 font-semibold text-gray-800">{po.supplier}</td>
+                        <td className="py-2.5 px-4 text-center">
+                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${
+                            po.stock_inward_done ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}>
+                            {po.stock_inward_done ? 'Received' : po.status || 'Pending'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-center font-medium text-gray-600">
+                          {po.payment_mode || po.payment_method || 'Credit'}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-black text-gray-900">
+                          Rs. {(po.total || 0).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
