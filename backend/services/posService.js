@@ -240,7 +240,13 @@ const processSalesReturn = async (returnData, currentUser = null) => {
       const pId = item.product_id;
       const qty = Number(item.quantity) || 0;
       if (qty > 0 && pId) {
-        const product = await Product.findById(pId);
+        let product = null;
+        if (mongoose.Types.ObjectId.isValid(pId)) {
+          product = await Product.findById(pId);
+        }
+        if (!product) {
+          product = await Product.findOne({ $or: [{ code: pId }, { name: pId }] });
+        }
         if (product) {
           if (product.batches && product.batches.length > 0) {
             product.batches[0].stock_qty += qty;

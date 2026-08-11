@@ -159,25 +159,33 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
 
     try {
       salesApi.salesReturn({
-        sale_id: loadedInvoice._id || loadedInvoice.id,
+        invoice_no: loadedInvoice.invoice_no,
         items: returnedItems.map(i => ({
           product_id: i.product_id || i.product?._id || i.product?.id,
           quantity: i.returnQty,
-          reason: i.reason
+          reason: i.reason,
+          batch_no: i.batch_no || 'DEFAULT'
         })),
-        refund_amount: refundTotal,
+        refund_total: refundTotal,
         refund_method: refundMethod
-      }).catch(() => {});
-    } catch(e) {}
+      }).then(() => {
+        if (triggerNotificationToast) {
+          triggerNotificationToast('Sales Refund Processed', `Refund of Rs. ${refundTotal.toLocaleString()} issued successfully.`, 'success');
+        }
+      }).catch((err) => {
+        console.error("Sales return backend error:", err);
+        if (triggerNotificationToast) {
+          triggerNotificationToast('Database Sync Warning', `Local return saved, but database sync failed: ${err.message || 'Validation error'}`, 'warning');
+        }
+      });
+    } catch(e) {
+      console.error(e);
+    }
 
     onReturnSaved(rec);
 
     if (addAuditLog) {
       addAuditLog('Sales Return Processed', `Processed refund for Invoice ${loadedInvoice.invoice_no}. Refunded Rs. ${refundTotal.toLocaleString()}. Stock successfully updated.`);
-    }
-
-    if (triggerNotificationToast) {
-      triggerNotificationToast('Sales Refund Processed', `Refund of Rs. ${refundTotal.toLocaleString()} issued successfully.`, 'success');
     }
 
     setSuccess(rec); // Store the returned record as success to show print button
