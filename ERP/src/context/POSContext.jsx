@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState } from 'react';
-import { PRODUCTS, CUSTOMERS, COMPANIES, UNITS, getStoredData } from '../utils/mockData';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { CUSTOMERS, UNITS } from '../utils/mockData';
+import { offerApi } from '../api';
 
 const POSContext = createContext();
 
@@ -17,24 +18,31 @@ export const getUnitOptions = (baseUnit) => UNIT_OPTIONS_MAP[baseUnit] || [{ key
 export const calcTotal = (price, discount, qty, factor = 1) =>
   parseFloat((Math.max(0, price - discount) * qty * factor).toFixed(2));
 
-const INITIAL_OFFERS_FALLBACK = [];
-
 // ── Offer Engine Helpers ──────────────────────────────────────────────────────
-const getActiveOffers = () => {
+// Filter offers that are currently active by date
+const filterActiveOffers = (allOffers) => {
   const today = new Date().toISOString().split('T')[0];
-  const all = getStoredData('AGRO_ERP_OFFERS', INITIAL_OFFERS_FALLBACK);
-  return all.filter(o => {
+  return allOffers.filter(o => {
     if (o.status === 'Inactive') return false;
     return today >= o.startDate && today <= o.endDate;
   });
 };
 
 const findMatchingOffer = (product, activeOffers) => {
-  const byProduct = activeOffers.find(o => o.scope === 'Product' && o.targetId === product.id);
-  if (byProduct) return byProduct;
-  const byCompany = activeOffers.find(o => o.scope === 'Company' && o.targetId === product.company_id);
-  if (byCompany) return byCompany;
-  const byCategory = activeOffers.find(o => o.scope === 'Category' && o.targetId === product.category_id);
+  if (!product || !activeOffers || activeOffers.length === 0) return null;
+
+  const prodId = (product._id || product.id)?.toString();
+  const compId = (product.company_id?._id || product.company_id || product.company)?.toString();
+  const catId  = (product.category_id?._id  || product.category_id  || product.category)?.toString();
+
+  // target_id is DB field; support legacy targetId too
+  const tid = (o) => (o.target_id?._id || o.target_id || o.targetId)?.toString();
+
+  const byProduct  = activeOffers.find(o => o.scope === 'Product'  && tid(o) === prodId);
+  if (byProduct)  return byProduct;
+  const byCompany  = compId ? activeOffers.find(o => o.scope === 'Company'  && tid(o) === compId) : null;
+  if (byCompany)  return byCompany;
+  const byCategory = catId ? activeOffers.find(o => o.scope === 'Category' && tid(o) === catId) : null;
   if (byCategory) return byCategory;
   return null;
 };
@@ -67,6 +75,15 @@ const computeOfferDiscount = (offer, unitPrice, quantity) => {
 
 export function POSProvider({ children, triggerNotificationToast }) {
   const [cart, setCart] = useState([]);
+  const [dbActiveOffers, setDbActiveOffers] = useState([]);
+
+  // Load active offers from the live database
+  useEffect(() => {
+    offerApi.getActive()
+      .then(data => { if (Array.isArray(data)) setDbActiveOffers(data); })
+      .catch(() => {});
+  }, []);
+
   const DEFAULT_CUST = CUSTOMERS[0] || { id: 'CUST001', _id: 'CUST001', name: 'Walk-in Customer', customer_type: 'Walk-in Customer', outstanding_balance: 0, available_credit: 50000 };
   const [selectedCustomer, setSelectedCustomer] = useState(DEFAULT_CUST);
   const [paymentMethod, setPaymentMethod] = useState('Cash');
@@ -109,7 +126,7 @@ export function POSProvider({ children, triggerNotificationToast }) {
     else if (selectedCustomer?.customer_type === 'Farmer')   unitPrice = product.farmer_price   || product.retail_price;
 
     // ── Apply active offer ───────────────────────────────────────────────────
-    const activeOffers = getActiveOffers();
+    const activeOffers = filterActiveOffers(dbActiveOffers);
     const matchedOffer = findMatchingOffer(product, activeOffers);
     
     let qtyToAdd = 1;
@@ -119,14 +136,15 @@ export function POSProvider({ children, triggerNotificationToast }) {
 
     const offerResult = computeOfferDiscount(matchedOffer, unitPrice, qtyToAdd);
 
-    const existingIndex = cart.findIndex(i => i.product.id === product.id && i.batch.id === batch.id);
+    const pIdStr = (product._id || product.id)?.toString();
+    const existingIndex = cart.findIndex(i => (i.product._id || i.product.id)?.toString() === pIdStr && i.batch.id === batch.id);
     const totalProductStock = product.batches?.reduce((sum, b) => sum + (b.stock_qty || 0), 0) || 0;
     
     if (existingIndex !== -1) {
       const updated = [...cart];
       const newQty = updated[existingIndex].quantity + qtyToAdd;
       
-      const otherReq = cart.filter((c, i) => i !== existingIndex && c.product.id === product.id)
+      const otherReq = cart.filter((c, i) => i !== existingIndex && (c.product._id || c.product.id)?.toString() === pIdStr)
                            .reduce((s, c) => s + (c.quantity * c.unitFactor), 0);
       const remainingForThisRow = totalProductStock - otherReq;
       const maxAllowed = Math.floor(Math.max(0, remainingForThisRow) / updated[existingIndex].unitFactor);
@@ -137,10 +155,12 @@ export function POSProvider({ children, triggerNotificationToast }) {
       }
       
       updated[existingIndex].quantity = newQty;
-      // Recalculate BuyXGetY free qty on quantity change
-      if (updated[existingIndex].offerType === 'BuyXGetY' && matchedOffer) {
+      if (matchedOffer) {
         const recomputed = computeOfferDiscount(matchedOffer, unitPrice, newQty);
-        updated[existingIndex].freeQty = recomputed.freeQty;
+        updated[existingIndex].discount = recomputed.discount;
+        updated[existingIndex].freeQty  = recomputed.freeQty;
+        updated[existingIndex].offerApplied = recomputed.offerApplied;
+        updated[existingIndex].offerType = recomputed.offerType;
       }
       const effectiveQty = updated[existingIndex].offerType === 'BuyXGetY'
         ? Math.max(0, newQty - (updated[existingIndex].freeQty || 0))
@@ -148,7 +168,7 @@ export function POSProvider({ children, triggerNotificationToast }) {
       updated[existingIndex].total = calcTotal(updated[existingIndex].price, updated[existingIndex].discount, effectiveQty, updated[existingIndex].unitFactor);
       setCart(updated);
     } else {
-      const currentCartReq = cart.filter(c => c.product.id === product.id)
+      const currentCartReq = cart.filter(c => (c.product._id || c.product.id)?.toString() === pIdStr)
                                  .reduce((s, c) => s + (c.quantity * c.unitFactor), 0);
       const remainingStock = totalProductStock - currentCartReq;
       if (remainingStock < qtyToAdd || totalProductStock <= 0) {
@@ -185,14 +205,16 @@ export function POSProvider({ children, triggerNotificationToast }) {
     setCart(prev => {
       const updated = [...prev];
       const item = { ...updated[index], ...changes };
-      // For BuyXGetY, recalculate freeQty and use effective paid qty for total
+      const activeOffers = filterActiveOffers(dbActiveOffers);
+      const matchedOffer = findMatchingOffer(item.product, activeOffers);
+      if (matchedOffer) {
+        const recomputed = computeOfferDiscount(matchedOffer, item.price, item.quantity);
+        item.discount = recomputed.discount;
+        item.freeQty = recomputed.freeQty;
+        item.offerApplied = recomputed.offerApplied;
+        item.offerType = recomputed.offerType;
+      }
       if (item.offerType === 'BuyXGetY') {
-        const activeOffers = getActiveOffers();
-        const matchedOffer = activeOffers.find(o => o.name === item.offerApplied);
-        if (matchedOffer) {
-          const cycleSize = (matchedOffer.buyQty || 1) + (matchedOffer.getQty || 1);
-          item.freeQty = Math.floor(item.quantity / cycleSize) * (matchedOffer.getQty || 1);
-        }
         const effectiveQty = Math.max(0, item.quantity - (item.freeQty || 0));
         item.total = calcTotal(item.price, item.discount, effectiveQty, item.unitFactor);
       } else {
@@ -285,6 +307,10 @@ export function POSProvider({ children, triggerNotificationToast }) {
   return (
     <POSContext.Provider value={{
       cart, setCart,
+      dbActiveOffers,
+      filterActiveOffers,
+      findMatchingOffer,
+      computeOfferDiscount,
       selectedCustomer, setSelectedCustomer, handleCustomerChange,
       paymentMethod, setPaymentMethod,
       receivedAmount, setReceivedAmount,

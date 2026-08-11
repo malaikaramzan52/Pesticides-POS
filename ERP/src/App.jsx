@@ -125,6 +125,14 @@ export default function App() {
     loadBackendData();
   }, []);
 
+  // Refresh invoices from DB (called after return/cancel)
+  const refreshInvoices = async () => {
+    try {
+      const salesRes = await salesApi.getHistory().catch(() => null);
+      if (salesRes && Array.isArray(salesRes)) setInvoices(salesRes);
+    } catch (_) {}
+  };
+
   // Global Date Filter State
   const [dateFilter, setDateFilter] = useState({ preset: 'All Time', startDate: '', endDate: '' });
 
@@ -417,6 +425,8 @@ export default function App() {
               {activeTab === 'returns' && (
                 <SalesReturnScreen 
                   invoices={invoices} 
+                  setInvoices={setInvoices}
+                  onReturnSaved={refreshInvoices}
                   addAuditLog={addAuditLog}
                   triggerNotificationToast={triggerNotificationToast}
                   defaultTab="sales"

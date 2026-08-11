@@ -13,16 +13,16 @@ import {
   Edit2,
   Search
 } from 'lucide-react';
-import { PRODUCTS, COMPANIES, CATEGORIES, getStoredData, setStoredData } from '../utils/mockData';
+
 import { offerApi, productApi, categoryApi, companyApi } from '../api';
 import { useLanguage } from '../context/LanguageContext';
 
 export default function OffersScreen({ triggerNotificationToast, addAuditLog }) {
   const { t } = useLanguage();
   const [offers, setOffers] = useState([]);
-  const [productsList, setProductsList] = useState(PRODUCTS);
-  const [companiesList, setCompaniesList] = useState(COMPANIES);
-  const [categoriesList, setCategoriesList] = useState(CATEGORIES);
+  const [productsList, setProductsList] = useState([]);
+  const [companiesList, setCompaniesList] = useState([]);
+  const [categoriesList, setCategoriesList] = useState([]);
   const [modal, setModal] = useState(null); // 'add' | 'edit' | 'delete'
   const [selectedOffer, setSelectedOffer] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,14 +73,15 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
   };
 
   const getTargetName = (scope, targetId) => {
+    const tid = targetId?.toString();
     if (scope === 'Product') {
-      const p = productsList.find(p => (p._id || p.id) === targetId);
+      const p = productsList.find(p => (p._id || p.id)?.toString() === tid);
       return p ? p.name : 'Unknown Product';
     } else if (scope === 'Company') {
-      const c = companiesList.find(c => (c._id || c.id) === targetId);
+      const c = companiesList.find(c => (c._id || c.id)?.toString() === tid);
       return c ? c.name : 'Unknown Brand';
     } else if (scope === 'Category') {
-      const cat = categoriesList.find(c => (c._id || c.id) === targetId);
+      const cat = categoriesList.find(c => (c._id || c.id)?.toString() === tid);
       return cat ? cat.name : 'Unknown Category';
     }
     return 'All Targets';
@@ -90,13 +91,13 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
   const handleOpenAdd = () => {
     setFormName('');
     setFormScope('Product');
-    setFormTargetId(PRODUCTS[0]?.id || '');
+    setFormTargetId((productsList[0]?._id || productsList[0]?.id) || '');
     setFormType('Percentage');
     setFormDiscountValue('');
     setFormBuyQty('');
     setFormGetQty('');
-    setFormStartDate('2026-08-07');
-    setFormEndDate('2026-08-31');
+    setFormStartDate(new Date().toISOString().split('T')[0]);
+    setFormEndDate(new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]);
     setFormStatus('Active');
     setFormError('');
     setModal('add');
@@ -108,7 +109,8 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
     setSelectedOffer(off);
     setFormName(off.name);
     setFormScope(off.scope);
-    setFormTargetId(off.targetId);
+    // Support both DB field (target_id) and legacy field (targetId)
+    setFormTargetId((off.target_id?._id || off.target_id || off.targetId || '')?.toString());
     setFormType(off.type);
     setFormDiscountValue(off.discountValue || '');
     setFormBuyQty(off.buyQty || '');
@@ -141,10 +143,13 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
     if (new Date(formStartDate) > new Date(formEndDate)) { setFormError('Start date cannot be after end date.'); return; }
 
     const isEdit = modal === 'edit';
+    // Find the target name for the DB record
+    const targetName = getTargetName(formScope, formTargetId);
     const offerPayload = {
       name: formName.trim(),
       scope: formScope,
-      targetId: formTargetId,
+      target_id: formTargetId,     // DB field name
+      target_name: targetName,
       type: formType,
       discountValue: formType !== 'BuyXGetY' ? parseFloat(formDiscountValue) : 0,
       buyQty: formType === 'BuyXGetY' ? parseInt(formBuyQty) : 0,
@@ -194,13 +199,14 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
   // Filtered List
   const filteredOffers = useMemo(() => {
     return offers.filter(off => {
+      const tid = (off.target_id?._id || off.target_id || off.targetId || '')?.toString();
       const matchesSearch = searchQuery === '' || 
         off.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        getTargetName(off.scope, off.targetId).toLowerCase().includes(searchQuery.toLowerCase());
+        getTargetName(off.scope, tid).toLowerCase().includes(searchQuery.toLowerCase());
       const matchesScope = scopeFilter === '' || off.scope === scopeFilter;
       return matchesSearch && matchesScope;
     });
-  }, [offers, searchQuery, scopeFilter]);
+  }, [offers, searchQuery, scopeFilter, productsList, companiesList, categoriesList]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -211,20 +217,20 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
     return { total, active, expired, disabled };
   }, [offers]);
 
-  // Dynamically resolve target lists inside select form
+  // Dynamically resolve target lists inside select form — use live DB lists
   const formTargets = useMemo(() => {
-    if (formScope === 'Product') return PRODUCTS.map(p => ({ id: p.id, name: p.name }));
-    if (formScope === 'Company') return COMPANIES.map(c => ({ id: c.id, name: c.name }));
-    if (formScope === 'Category') return CATEGORIES.map(c => ({ id: c.id, name: c.name }));
+    if (formScope === 'Product') return productsList.map(p => ({ id: (p._id || p.id)?.toString(), name: p.name }));
+    if (formScope === 'Company') return companiesList.map(c => ({ id: (c._id || c.id)?.toString(), name: c.name }));
+    if (formScope === 'Category') return categoriesList.map(c => ({ id: (c._id || c.id)?.toString(), name: c.name }));
     return [];
-  }, [formScope]);
+  }, [formScope, productsList, companiesList, categoriesList]);
 
   // Set default target item when scope switches
   const handleScopeChange = (newScope) => {
     setFormScope(newScope);
-    if (newScope === 'Product') setFormTargetId(PRODUCTS[0]?.id || '');
-    else if (newScope === 'Company') setFormTargetId(COMPANIES[0]?.id || '');
-    else if (newScope === 'Category') setFormTargetId(CATEGORIES[0]?.id || '');
+    if (newScope === 'Product')   setFormTargetId((productsList[0]?._id  || productsList[0]?.id  || '')?.toString());
+    else if (newScope === 'Company')  setFormTargetId((companiesList[0]?._id || companiesList[0]?.id || '')?.toString());
+    else if (newScope === 'Category') setFormTargetId((categoriesList[0]?._id || categoriesList[0]?.id || '')?.toString());
   };
 
   return (
@@ -347,7 +353,7 @@ export default function OffersScreen({ triggerNotificationToast, addAuditLog }) 
                         </span>
                       </td>
                       <td className="py-3.5 px-4 font-bold text-gray-700">
-                        {getTargetName(off.scope, off.targetId)}
+                        {getTargetName(off.scope, (off.target_id?._id || off.target_id || off.targetId || '')?.toString())}
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-gray-600">{off.type === 'BuyXGetY' ? 'Buy X Get Y' : `${off.type} Discount`}</td>
                       <td className="py-3.5 px-4 text-center font-black text-indigo-700 font-mono">{benefitText}</td>

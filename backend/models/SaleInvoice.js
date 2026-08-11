@@ -5,6 +5,7 @@ const saleInvoiceItemSchema = new mongoose.Schema({
   product_name: { type: String, required: true },
   batch_no: { type: String, default: 'N/A' },
   quantity: { type: Number, required: true, min: 1 },
+  returned_qty: { type: Number, default: 0 },   // tracks cumulative returned qty per item
   unit: { type: String, required: true },
   price: { type: Number, required: true },
   line_total: { type: Number, required: true },
@@ -50,7 +51,19 @@ const saleInvoiceSchema = new mongoose.Schema({
   payment_method: { type: String, required: true },
   payment_details: { type: Object, default: {} },
   is_held: { type: Boolean, default: false },
-  status: { type: String, enum: ['Completed', 'Cancelled'], default: 'Completed' },
+  // Extended status includes return states
+  status: { 
+    type: String, 
+    enum: ['Completed', 'Cancelled', 'Fully Returned', 'Partial Return'], 
+    default: 'Completed' 
+  },
+  // Tracks overall return progress
+  return_status: {
+    type: String,
+    enum: ['None', 'Partial', 'Full'],
+    default: 'None'
+  },
+  total_returned_amount: { type: Number, default: 0 },
   cancellation_details: cancellationSchema,
   refund_status: { type: String, enum: ['Not Required', 'Pending', 'Refunded'], default: 'Not Required' },
   refund_method: { type: String, default: '' },

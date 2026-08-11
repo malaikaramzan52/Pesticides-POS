@@ -52,6 +52,7 @@ export default function POSScreen({
   };
   const {
     cart, setCart,
+    dbActiveOffers, filterActiveOffers, findMatchingOffer,
     selectedCustomer, setSelectedCustomer, handleCustomerChange,
     paymentMethod, setPaymentMethod,
     receivedAmount, setReceivedAmount,
@@ -466,22 +467,33 @@ export default function POSScreen({
                 )}
                 {searchResults.length > 0 && (
                   <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-30 overflow-hidden max-h-72 overflow-y-auto divide-y divide-gray-100">
-                    {searchResults.map((prod, i) => (
-                      <div
-                        key={prod._id || prod.id || `sr_${i}`}
-                        onMouseDown={e => { e.preventDefault(); addProductToCart(prod); }}
-                        className="p-3 hover:bg-green-50/70 cursor-pointer transition flex items-center justify-between group"
-                      >
-                        <div className="min-w-0 pr-2">
-                          <h4 className="text-xs font-bold text-gray-900 group-hover:text-green-700 truncate">{prod.name}</h4>
-                          <span className="text-[10px] text-gray-400 font-mono block">SKU: {prod.code}</span>
+                    {searchResults.map((prod, i) => {
+                      const activeOffers = dbActiveOffers && filterActiveOffers ? filterActiveOffers(dbActiveOffers) : [];
+                      const matchedOffer = findMatchingOffer ? findMatchingOffer(prod, activeOffers) : null;
+                      return (
+                        <div
+                          key={prod._id || prod.id || `sr_${i}`}
+                          onMouseDown={e => { e.preventDefault(); addProductToCart(prod); }}
+                          className="p-3 hover:bg-green-50/70 cursor-pointer transition flex items-center justify-between group"
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-xs font-bold text-gray-900 group-hover:text-green-700 truncate">{prod.name}</h4>
+                              {matchedOffer && (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                                  🏷️ {matchedOffer.name}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-gray-400 font-mono block">SKU: {prod.code}</span>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-xs font-extrabold text-green-700 font-mono block">Rs. {prod.retail_price}</span>
+                            <span className="text-[10px] text-gray-400">Stock: {(Array.isArray(prod.batches) ? prod.batches : []).reduce((s, b) => s + (b?.stock_qty || 0), 0)}</span>
+                          </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <span className="text-xs font-extrabold text-green-700 font-mono block">Rs. {prod.retail_price}</span>
-                          <span className="text-[10px] text-gray-400">Stock: {(Array.isArray(prod.batches) ? prod.batches : []).reduce((s, b) => s + (b?.stock_qty || 0), 0)}</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </form>
@@ -563,7 +575,9 @@ export default function POSScreen({
                     const rawUnitName = UNITS.find(u => u.id === prod.unit_id)?.name || 'Unit';
                     const catName  = translateCat(rawCatName);
                     const unitName = translateUnit(rawUnitName);
-                    const inCart   = cart.some(i => i.product.id === prod.id);
+                    const inCart   = cart.some(i => (i.product._id || i.product.id)?.toString() === (prod._id || prod.id)?.toString());
+                    const activeOffers = dbActiveOffers && filterActiveOffers ? filterActiveOffers(dbActiveOffers) : [];
+                    const matchedOffer = findMatchingOffer ? findMatchingOffer(prod, activeOffers) : null;
 
                     return (
                       <tr
@@ -573,9 +587,18 @@ export default function POSScreen({
                       >
                         <td className="py-2.5 px-3 font-bold text-gray-400 w-12 whitespace-nowrap">{(catalogPage - 1) * ITEMS_PER_PAGE + idx + 1}</td>
                         <td className="py-2.5 px-3 font-bold text-gray-900 group-hover:text-green-700 min-w-[200px]">
-                          <div className="truncate flex items-center">
-                            {prod.name}
-                            {inCart && <span className="ml-2 rtl:ml-0 rtl:mr-2 text-[9px] bg-green-100 text-green-700 font-extrabold px-1.5 py-0.5 rounded border border-green-200">{t('in_cart', 'In Cart')}</span>}
+                          <div className="truncate flex items-center gap-1.5 flex-wrap">
+                            <span>{prod.name}</span>
+                            {matchedOffer && (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
+                                🏷️ {matchedOffer.type === 'BuyXGetY'
+                                  ? `Buy ${matchedOffer.buyQty} Get ${matchedOffer.getQty} Free`
+                                  : matchedOffer.type === 'Percentage'
+                                  ? `${matchedOffer.discountValue}% OFF`
+                                  : `Rs. ${matchedOffer.discountValue} OFF`}
+                              </span>
+                            )}
+                            {inCart && <span className="text-[9px] bg-green-100 text-green-700 font-extrabold px-1.5 py-0.5 rounded border border-green-200">{t('in_cart', 'In Cart')}</span>}
                           </div>
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-gray-500 text-[11px] w-24 whitespace-nowrap">{prod.code}</td>
@@ -588,7 +611,20 @@ export default function POSScreen({
                           }`}>{stock > 0 ? stock : t('out_of_stock', 'Out')}</span>
                         </td>
                         <td className="py-2.5 px-3 text-center text-gray-500 font-medium w-24 whitespace-nowrap">{unitName}</td>
-                        <td className="py-2.5 px-3 text-right rtl:text-left font-mono font-black text-green-700 w-32 whitespace-nowrap">Rs. {unitPrice}</td>
+                        <td className="py-2.5 px-3 text-right rtl:text-left font-mono font-black text-green-700 w-32 whitespace-nowrap">
+                          {matchedOffer && (matchedOffer.type === 'Percentage' || matchedOffer.type === 'Fixed') ? (
+                            <div>
+                              <span className="line-through text-gray-400 text-[10px] block font-normal">Rs. {unitPrice}</span>
+                              <span className="text-green-700 font-extrabold">
+                                Rs. {(matchedOffer.type === 'Percentage'
+                                  ? (unitPrice - (unitPrice * matchedOffer.discountValue) / 100)
+                                  : Math.max(0, unitPrice - matchedOffer.discountValue)).toFixed(2)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span>Rs. {unitPrice}</span>
+                          )}
+                        </td>
                         <td className="py-2.5 px-3 text-center w-24">
                           <button
                             type="button"

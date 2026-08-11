@@ -54,26 +54,76 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
   const [success, setSuccess]             = useState('');
 
   const handleSearch = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     setError(''); setSuccess('');
     const query = invoiceQuery.toLowerCase().trim();
+    if (!query) {
+      setError('Please enter an invoice number to search.');
+      setLoadedInvoice(null);
+      return;
+    }
+
     const inv = invoices.find(i =>
       i.invoice_no?.toLowerCase() === query ||
       i.id?.toLowerCase() === query ||
+      i._id?.toLowerCase() === query ||
       i.invoice_no?.toLowerCase().endsWith(query) ||
       i.id?.toLowerCase().endsWith(query)
     );
-    if (inv) {
-      setLoadedInvoice(inv);
-      setReturnItems(inv.items.map(item => ({ ...item, returnQty: item.quantity, reason: REASONS_SALE[0] })));
-    } else {
+
+    if (!inv) {
       setError(`Invoice "${invoiceQuery}" not found.`);
       setLoadedInvoice(null);
+      return;
     }
+
+    // Block cancelled invoices immediately
+    if (inv.status === 'Cancelled' || inv.payment_status === 'Cancelled') {
+      setError(`Invoice "${inv.invoice_no}" is cancelled. Returns are not allowed.`);
+      setLoadedInvoice(null);
+      return;
+    }
+
+    // Check if all items in the invoice are already fully returned
+    const allItemsReturned = inv.items && inv.items.length > 0 && inv.items.every(item => {
+      const returned = Number(item.returned_qty || 0);
+      const original = Number(item.quantity || 0);
+      return returned >= original;
+    });
+
+    // Block fully-returned invoices immediately
+    if (inv.return_status === 'Full' || inv.status === 'Fully Returned' || allItemsReturned) {
+      setError(`Invoice "${inv.invoice_no}" has already been fully returned. No further returns allowed.`);
+      setLoadedInvoice(null);
+      return;
+    }
+
+    // Filter to returnable items only
+    const returnableItems = (inv.items || []).map(item => {
+      const returned = Number(item.returned_qty || 0);
+      const original = Number(item.quantity || 0);
+      const available = Math.max(0, original - returned);
+      return {
+        ...item,
+        returnQty: available,
+        maxReturnQty: available,
+        reason: REASONS_SALE[0]
+      };
+    }).filter(item => item.maxReturnQty > 0);
+
+    if (returnableItems.length === 0) {
+      setError(`Invoice "${inv.invoice_no}" has already been fully returned. No further returns allowed.`);
+      setLoadedInvoice(null);
+      return;
+    }
+
+    setLoadedInvoice(inv);
+    setReturnItems(returnableItems);
   };
 
   const setQty = (idx, val) => {
-    const q = Math.max(0, Math.min(loadedInvoice.items[idx].quantity, parseInt(val) || 0));
+    const maxQ = returnItems[idx]?.maxReturnQty ?? (loadedInvoice?.items[idx]?.quantity || 999);
+    const q = Math.max(0, Math.min(maxQ, parseInt(val) || 0));
     setReturnItems(p => p.map((item, i) => i === idx ? { ...item, returnQty: q } : item));
   };
 
@@ -90,7 +140,7 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
     }
   }, [refundTotal, refundAmount]);
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!hasReturn) { setError('Please enter return quantity for at least one item.'); return; }
     
     const returnedItems = returnItems.filter(i => i.returnQty > 0);
@@ -158,37 +208,40 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
     };
 
     try {
-      salesApi.salesReturn({
+      await salesApi.salesReturn({
         invoice_no: loadedInvoice.invoice_no,
+        customer: loadedInvoice.customer_name || loadedInvoice.customer || 'Walk-in Customer',
         items: returnedItems.map(i => ({
-          product_id: i.product_id || i.product?._id || i.product?.id,
-          quantity: i.returnQty,
-          reason: i.reason,
-          batch_no: i.batch_no || 'DEFAULT'
+          name: i.product_name || i.name || 'Unknown Product',
+          qty: i.returnQty,
+          rate: i.price || i.rate || 0,
+          reason: i.reason || 'Farmer Return'
         })),
         refund_total: refundTotal,
         refund_method: refundMethod
-      }).then(() => {
-        if (triggerNotificationToast) {
-          triggerNotificationToast('Sales Refund Processed', `Refund of Rs. ${refundTotal.toLocaleString()} issued successfully.`, 'success');
-        }
-      }).catch((err) => {
-        console.error("Sales return backend error:", err);
-        if (triggerNotificationToast) {
-          triggerNotificationToast('Database Sync Warning', `Local return saved, but database sync failed: ${err.message || 'Validation error'}`, 'warning');
-        }
       });
-    } catch(e) {
-      console.error(e);
-    }
 
-    onReturnSaved(rec);
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Sales Refund Processed', `Refund of Rs. ${refundTotal.toLocaleString()} issued successfully.`, 'success');
+      }
+
+      // Refresh invoice list from DB so return_status is immediately updated
+      if (onReturnSaved) await onReturnSaved(rec);
+
+    } catch(err) {
+      console.error("Sales return backend error:", err);
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Return Failed', `Database error: ${err.message || 'Please try again.'}`, 'error');
+      }
+      setError(`Return failed: ${err.message || 'Server error. Please try again.'}`);
+      return; // Don't clear form on failure
+    }
 
     if (addAuditLog) {
       addAuditLog('Sales Return Processed', `Processed refund for Invoice ${loadedInvoice.invoice_no}. Refunded Rs. ${refundTotal.toLocaleString()}. Stock successfully updated.`);
     }
 
-    setSuccess(rec); // Store the returned record as success to show print button
+    setSuccess(rec);
     setLoadedInvoice(null); setReturnItems([]); setInvoiceQuery(''); setError('');
   };
 
@@ -202,7 +255,11 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
             type="text" placeholder="Enter Invoice No. e.g. INV-2026-0001"
-            value={invoiceQuery} onChange={e => setInvoiceQuery(e.target.value)}
+            value={invoiceQuery} onChange={e => {
+              setInvoiceQuery(e.target.value);
+              if (error) setError('');
+              if (success) setSuccess('');
+            }}
             className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-800 focus:border-green-500 focus:ring-2 focus:ring-green-500/10 focus:outline-none transition"
           />
         </div>

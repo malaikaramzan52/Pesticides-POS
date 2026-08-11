@@ -22,17 +22,23 @@ import PaymentProcessor from './PaymentProcessor';
 import { useLanguage } from '../context/LanguageContext';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }) {
+function StatusBadge({ status, returnStatus }) {
   const map = {
-    Paid:      { cls: 'bg-green-100 text-green-700  border-green-200',  icon: CheckCircle2 },
-    Credit:    { cls: 'bg-amber-100 text-amber-700  border-amber-200',  icon: Clock },
-    Unpaid:    { cls: 'bg-red-100   text-red-700    border-red-200',    icon: XCircle },
-    Cancelled: { cls: 'bg-gray-100  text-gray-700   border-gray-200',   icon: XCircle },
+    Paid:              { cls: 'bg-green-100 text-green-700  border-green-200',  icon: CheckCircle2 },
+    Credit:            { cls: 'bg-amber-100 text-amber-700  border-amber-200',  icon: Clock },
+    Unpaid:            { cls: 'bg-red-100   text-red-700    border-red-200',    icon: XCircle },
+    Cancelled:         { cls: 'bg-gray-100  text-gray-700   border-gray-200',   icon: XCircle },
+    'Fully Returned':  { cls: 'bg-purple-100 text-purple-700 border-purple-200', icon: RefreshCcw },
+    'Partial Return':  { cls: 'bg-blue-100  text-blue-700  border-blue-200',   icon: RefreshCcw },
   };
-  const { cls, icon: Icon } = map[status] || map['Unpaid'];
+  // If invoice status is a return state, show that first
+  const displayStatus = (returnStatus === 'Full' || status === 'Fully Returned') ? 'Fully Returned'
+    : (returnStatus === 'Partial' || status === 'Partial Return') ? 'Partial Return'
+    : status;
+  const { cls, icon: Icon } = map[displayStatus] || map['Unpaid'];
   return (
     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${cls}`}>
-      <Icon size={9} /> {status}
+      <Icon size={9} /> {displayStatus}
     </span>
   );
 }
@@ -432,17 +438,29 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
     const q = searchQuery.toLowerCase();
     return dateFilteredInvoices.filter(inv => {
       const matchQ      = !q || inv.invoice_no.toLowerCase().includes(q) || inv.customer_name.toLowerCase().includes(q) || getCustomerCity(inv.customer_name).toLowerCase().includes(q);
-      const matchStatus = !statusFilter || inv.payment_status === statusFilter;
+      // Match status against both payment_status and invoice status (for return/cancel states)
+      const matchStatus = !statusFilter || inv.payment_status === statusFilter || inv.status === statusFilter ||
+        (statusFilter === 'Fully Returned'  && (inv.return_status === 'Full'    || inv.status === 'Fully Returned')) ||
+        (statusFilter === 'Partial Return'  && (inv.return_status === 'Partial' || inv.status === 'Partial Return')) ||
+        (statusFilter === 'Cancelled'       && (inv.status === 'Cancelled'      || inv.payment_status === 'Cancelled'));
       const matchType   = !typeFilter   || inv.customer_type   === typeFilter;
       return matchQ && matchStatus && matchType;
     });
   }, [dateFilteredInvoices, searchQuery, statusFilter, typeFilter]);
 
+  // Exclude cancelled and fully-returned from stats
+  const activeSales = dateFilteredInvoices.filter(i =>
+    i.status !== 'Cancelled' &&
+    i.payment_status !== 'Cancelled' &&
+    i.status !== 'Fully Returned' &&
+    i.return_status !== 'Full'
+  );
+
   // Stats
-  const totalSales   = dateFilteredInvoices.reduce((s, i) => s + i.grand_total, 0);
-  const paidTotal    = dateFilteredInvoices.filter(i => i.payment_status === 'Paid').reduce((s, i) => s + i.grand_total, 0);
-  const creditTotal  = dateFilteredInvoices.filter(i => i.payment_status === 'Credit').reduce((s, i) => s + i.remaining_amount, 0);
-  const invoiceCount = dateFilteredInvoices.length;
+  const totalSales   = activeSales.reduce((s, i) => s + i.grand_total, 0);
+  const paidTotal    = activeSales.filter(i => i.payment_status === 'Paid').reduce((s, i) => s + i.grand_total, 0);
+  const creditTotal  = activeSales.filter(i => i.payment_status === 'Credit').reduce((s, i) => s + i.remaining_amount, 0);
+  const invoiceCount = activeSales.length;
 
   const hasFilters = searchQuery || statusFilter || typeFilter;
 
@@ -509,6 +527,9 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
           <option value="Paid">Paid</option>
           <option value="Credit">Credit</option>
           <option value="Unpaid">Unpaid</option>
+          <option value="Fully Returned">Fully Returned</option>
+          <option value="Partial Return">Partial Return</option>
+          <option value="Cancelled">Cancelled</option>
         </select>
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
           className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 focus:border-green-500 focus:outline-none transition">
@@ -554,7 +575,7 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
                   {hasFilters ? 'No invoices match the filters.' : 'No sales recorded yet.'}
                 </td></tr>
               ) : filtered.map(inv => (
-                <tr key={inv.id} className="hover:bg-gray-50/60 transition group">
+                <tr key={inv._id || inv.id} className="hover:bg-gray-50/60 transition group">
                   <td className="py-3.5 px-4 font-mono font-bold text-green-700">{inv.invoice_no}</td>
                   <td className="py-3.5 px-4">
                     <span className="font-bold text-gray-900 block">{inv.customer_name}</span>
@@ -574,7 +595,7 @@ export default function SalesScreen({ invoices = [], setInvoices, triggerNotific
                     {inv.remaining_amount > 0 ? `Rs. ${inv.remaining_amount?.toLocaleString()}` : '—'}
                   </td>
                   <td className="py-3.5 px-4 text-center text-gray-500 font-medium text-[10px] hidden lg:table-cell">{inv.payment_method}</td>
-                  <td className="py-3.5 px-4 text-center"><StatusBadge status={inv.payment_status} /></td>
+                  <td className="py-3.5 px-4 text-center"><StatusBadge status={inv.payment_status} returnStatus={inv.return_status} /></td>
                   <td className="py-3.5 px-4">
                     <div className="flex items-center justify-center gap-1.5">
                       {inv.remaining_amount > 0 && inv.payment_status !== 'Cancelled' && inv.status !== 'Cancelled' && (

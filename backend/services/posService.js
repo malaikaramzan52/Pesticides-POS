@@ -229,76 +229,162 @@ const processPOSSale = async (saleData, currentUser = null) => {
 };
 
 const processSalesReturn = async (returnData, currentUser = null) => {
-  const { invoice_no, items, refund_total, refund_method, refund_details } = returnData;
+  const { invoice_no, items, refund_total, refund_method, refund_details, customer } = returnData;
 
   const invoice = await SaleInvoice.findOne({ invoice_no });
   if (!invoice) throw new ApiError(404, `Invoice "${invoice_no}" not found`);
 
-  // 1. Restore stock to Product batches and WarehouseStock pos_counter_qty in MongoDB
-  if (items && Array.isArray(items)) {
-    for (const item of items) {
-      const pId = item.product_id;
-      const qty = Number(item.quantity) || 0;
-      if (qty > 0 && pId) {
-        let product = null;
-        if (mongoose.Types.ObjectId.isValid(pId)) {
-          product = await Product.findById(pId);
-        }
-        if (!product) {
-          product = await Product.findOne({ $or: [{ code: pId }, { name: pId }] });
-        }
-        if (product) {
-          if (product.batches && product.batches.length > 0) {
-            product.batches[0].stock_qty += qty;
-          } else {
-            product.batches.push({
-              batch_no: item.batch_no || 'BATCH-RETURNED',
-              stock_qty: qty,
-              mfg_date: 'N/A',
-              expiry_date: 'N/A',
-              purchase_rate: product.purchase_price || 0,
-              selling_rate: product.retail_price || 0
-            });
-          }
-          product.markModified('batches');
-          await product.save();
+  // ── Guard: block return on cancelled invoices ──────────────────────────────
+  if (invoice.status === 'Cancelled') {
+    throw new ApiError(400, `Invoice "${invoice_no}" is cancelled. Returns not allowed.`);
+  }
 
-          // Sync POS counter stock in WarehouseStock
-          const totalStock = product.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
-          await WarehouseStock.findOneAndUpdate(
-            { product_id: product._id },
-            { 
-              product_name: product.name,
-              code: product.code,
-              pos_counter_qty: totalStock 
-            },
-            { upsert: true }
-          );
-        }
+  // ── Guard: block return on fully-returned invoices ─────────────────────────
+  if (invoice.return_status === 'Full' || invoice.status === 'Fully Returned') {
+    throw new ApiError(400, `Invoice "${invoice_no}" has already been fully returned. No further returns allowed.`);
+  }
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw new ApiError(400, 'Return items are required');
+  }
+
+  let actualRefundTotal = 0;
+  let allItemsFullyReturned = true;
+
+  // ── 1. Validate return qtys and restore stock ──────────────────────────────
+  for (const item of items) {
+    const returnQty = Number(item.qty || item.quantity) || 0;
+    if (returnQty <= 0) continue;
+
+    // Find corresponding invoice item by name match
+    const invoiceItem = invoice.items.find(
+      ii => ii.product_name?.toLowerCase() === (item.name || '').toLowerCase()
+    );
+
+    if (invoiceItem) {
+      const alreadyReturned = invoiceItem.returned_qty || 0;
+      const maxReturnable    = invoiceItem.quantity - alreadyReturned;
+
+      if (maxReturnable <= 0) {
+        throw new ApiError(400, `"${invoiceItem.product_name}" has already been fully returned.`);
       }
+
+      const validQty = Math.min(returnQty, maxReturnable);
+
+      // Restore stock in product batches
+      let product = null;
+      if (mongoose.Types.ObjectId.isValid(invoiceItem.product_id)) {
+        product = await Product.findById(invoiceItem.product_id);
+      }
+      if (!product && item.name) {
+        product = await Product.findOne({ name: { $regex: new RegExp(`^${item.name}$`, 'i') } });
+      }
+
+      if (product) {
+        if (product.batches && product.batches.length > 0) {
+          // Try to restore to the same batch that was sold
+          const targetBatch = product.batches.find(b => b.batch_no === (invoiceItem.batch_no || 'N/A')) || product.batches[0];
+          targetBatch.stock_qty = (targetBatch.stock_qty || 0) + validQty;
+        } else {
+          product.batches.push({
+            batch_no: invoiceItem.batch_no || 'BATCH-RETURNED',
+            stock_qty: validQty,
+            mfg_date: 'N/A',
+            expiry_date: 'N/A',
+            purchase_rate: product.purchase_price || 0,
+            selling_rate: product.retail_price || 0
+          });
+        }
+        product.markModified('batches');
+        await product.save();
+
+        // Sync WarehouseStock pos_counter_qty
+        const totalStock = product.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
+        await WarehouseStock.findOneAndUpdate(
+          { product_id: product._id },
+          { product_name: product.name, code: product.code, pos_counter_qty: totalStock },
+          { upsert: true }
+        );
+      }
+
+      // Update returned_qty on invoice item
+      invoiceItem.returned_qty = alreadyReturned + validQty;
+      actualRefundTotal += validQty * (invoiceItem.price || 0);
+
+      // Check if this item is still not fully returned
+      if (invoiceItem.returned_qty < invoiceItem.quantity) {
+        allItemsFullyReturned = false;
+      }
+    } else {
+      // Item not found in invoice — skip silently (might be a free item)
+      allItemsFullyReturned = false;
     }
   }
 
+  // Check items that weren't part of this return
+  for (const ii of invoice.items) {
+    if ((ii.returned_qty || 0) < ii.quantity) {
+      allItemsFullyReturned = false;
+    }
+  }
+
+  // ── 2. Update invoice return_status & status ───────────────────────────────
+  const usedRefundTotal = actualRefundTotal || Number(refund_total) || 0;
+  invoice.total_returned_amount = (invoice.total_returned_amount || 0) + usedRefundTotal;
+
+  if (allItemsFullyReturned) {
+    invoice.return_status = 'Full';
+    invoice.status        = 'Fully Returned';
+    invoice.refund_status = 'Refunded';
+  } else {
+    invoice.return_status = 'Partial';
+    invoice.status        = 'Partial Return';
+  }
+  invoice.markModified('items');
+  await invoice.save();
+
+  // ── 3. Update Customer ledger if credit sale was returned ──────────────────
+  try {
+    const cust = await mongoose.model('Customer').findById(invoice.customer_id);
+    if (cust && invoice.payment_method === 'Credit' && usedRefundTotal > 0) {
+      cust.outstanding_balance = Math.max(0, (cust.outstanding_balance || 0) - usedRefundTotal);
+      await cust.save();
+
+      await CustomerPayment.create({
+        customer_id: cust._id,
+        customer_name: cust.name,
+        date: new Date().toISOString().split('T')[0],
+        amount: usedRefundTotal,
+        payment_method: refund_method || 'Cash',
+        ref_no: invoice_no,
+        type: 'Sales Return',
+        notes: `Sales Return for Invoice ${invoice_no}`
+      });
+    }
+  } catch (_) { /* ledger update failure is non-fatal */ }
+
+  // ── 4. Save the SalesReturn record ────────────────────────────────────────
   const returnRecord = await SalesReturn.create({
     return_no: `SR${Date.now()}`,
     date: new Date().toISOString().split('T')[0],
     invoice_no,
-    customer: invoice.customer_name,
+    customer: customer || invoice.customer_name,
     items,
-    refund_total,
-    refund_method,
+    refund_total: usedRefundTotal,
+    refund_method: refund_method || 'Cash',
     refund_details: refund_details || {},
     status: 'Processed'
   });
 
   await auditService.logAction(
     'Sales Return Processed',
-    `Processed refund for Invoice ${invoice_no}. Refunded Rs. ${refund_total}. Stock and value updated.`,
+    `Invoice ${invoice_no} — ${allItemsFullyReturned ? 'FULL' : 'PARTIAL'} return. Refunded Rs. ${usedRefundTotal}.`,
     currentUser ? currentUser.name : 'Admin'
   );
 
-  return returnRecord;
+  return { returnRecord, invoice };
 };
+
 
 const cancelSaleInvoice = async (invoiceId, cancelData, currentUser = null) => {
   const invoice = await SaleInvoice.findById(invoiceId);
