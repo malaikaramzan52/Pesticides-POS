@@ -20,7 +20,7 @@ const DEFAULT_ACCOUNTS = [
 ];
 
 const getAccounts = async () => {
-  let accounts = await Account.find({ status: 'Active' });
+  let accounts = await Account.find({ status: 'Active' }).lean();
   if (accounts.length === 0) {
     accounts = await Account.insertMany(DEFAULT_ACCOUNTS);
   }
@@ -55,7 +55,7 @@ const getAccountStatement = async ({ accountName = 'Cash', startDate = '', endDa
   const rawRows = [];
 
   // 1. Sales Invoices (Money In) & Cancelled Refund (Money Out)
-  const invoices = await SaleInvoice.find({});
+  const invoices = await SaleInvoice.find({}).lean();
   invoices.forEach(inv => {
     const invAcc = normalizeAccountName(inv.payment_method || 'Cash');
     if (invAcc === targetAcc && inv.status !== 'Cancelled') {
@@ -101,7 +101,7 @@ const getAccountStatement = async ({ accountName = 'Cash', startDate = '', endDa
   });
 
   // 2. Expenses (Money Out)
-  const expenses = await Expense.find({ status: 'Paid' });
+  const expenses = await Expense.find({ status: 'Paid' }).lean();
   expenses.forEach(exp => {
     const expAcc = normalizeAccountName(exp.payment_method || 'Cash');
     if (expAcc === targetAcc) {
@@ -125,7 +125,7 @@ const getAccountStatement = async ({ accountName = 'Cash', startDate = '', endDa
   });
 
   // 3. Purchase Orders (Money Out)
-  const posList = await PurchaseOrder.find({ status: { $ne: 'Cancelled' } });
+  const posList = await PurchaseOrder.find({ status: { $ne: 'Cancelled' } }).lean();
   posList.forEach(po => {
     const poAcc = normalizeAccountName(po.payment_method || 'Bank Transfer');
     if (poAcc === targetAcc) {
@@ -149,7 +149,7 @@ const getAccountStatement = async ({ accountName = 'Cash', startDate = '', endDa
   });
 
   // 4. Customer Receipts (Money In)
-  const custPayments = await CustomerPayment.find({});
+  const custPayments = await CustomerPayment.find({}).lean();
   custPayments.forEach(cp => {
     const cpAcc = normalizeAccountName(cp.payment_method || 'Cash');
     if (cpAcc === targetAcc) {
@@ -173,7 +173,7 @@ const getAccountStatement = async ({ accountName = 'Cash', startDate = '', endDa
   });
 
   // 5. Vendor Disbursements (Money Out)
-  const vendorPayments = await VendorPayment.find({});
+  const vendorPayments = await VendorPayment.find({}).lean();
   vendorPayments.forEach(vp => {
     const vpAcc = normalizeAccountName(vp.payment_method || 'Bank Transfer');
     if (vpAcc === targetAcc) {

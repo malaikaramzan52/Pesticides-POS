@@ -23,6 +23,58 @@ const handleResponse = async (response) => {
   return data.data !== undefined ? data.data : data;
 };
 
+// ── Ultra-Fast SWR & Request Deduplication Engine ───────────────────────────
+const memoryCache = new Map();
+const inFlightPromises = new Map();
+
+const cachedFetchGet = async (url, ttlMs = 30000) => {
+  const cached = memoryCache.get(url);
+  const now = Date.now();
+
+  // If cache is fresh (< 30s), return immediately (0ms)
+  if (cached && (now - cached.timestamp < ttlMs)) {
+    return cached.data;
+  }
+
+  // Deduplicate active requests to the exact same URL
+  if (inFlightPromises.has(url)) {
+    return inFlightPromises.get(url);
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const res = await fetch(url, { headers: getHeaders() });
+      const data = await handleResponse(res);
+      memoryCache.set(url, { timestamp: Date.now(), data });
+      return data;
+    } finally {
+      inFlightPromises.delete(url);
+    }
+  })();
+
+  inFlightPromises.set(url, fetchPromise);
+
+  // If stale cache exists, return stale immediately (0ms) while background fetch updates
+  if (cached) {
+    fetchPromise.catch(() => {});
+    return cached.data;
+  }
+
+  return fetchPromise;
+};
+
+export const invalidateApiCache = (urlPrefix = '') => {
+  if (!urlPrefix) {
+    memoryCache.clear();
+    return;
+  }
+  for (const key of memoryCache.keys()) {
+    if (key.includes(urlPrefix)) {
+      memoryCache.delete(key);
+    }
+  }
+};
+
 // ── Auth API ─────────────────────────────────────────────────────────────────
 export const authApi = {
   login: async (passcode, username = 'admin') => {
@@ -34,16 +86,14 @@ export const authApi = {
     return handleResponse(res);
   },
   getMe: async () => {
-    const res = await fetch(`${API_BASE_URL}/auth/me`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/auth/me`, 60000);
   }
 };
 
 // ── User API ─────────────────────────────────────────────────────────────────
 export const userApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/users`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/users`, 15000);
   },
   create: async (userData) => {
     const res = await fetch(`${API_BASE_URL}/users`, {
@@ -51,6 +101,7 @@ export const userApi = {
       headers: getHeaders(),
       body: JSON.stringify(userData)
     });
+    invalidateApiCache('/users');
     return handleResponse(res);
   },
   update: async (id, userData) => {
@@ -59,6 +110,7 @@ export const userApi = {
       headers: getHeaders(),
       body: JSON.stringify(userData)
     });
+    invalidateApiCache('/users');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -66,6 +118,7 @@ export const userApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/users');
     return handleResponse(res);
   }
 };
@@ -75,12 +128,10 @@ export const productApi = {
   getAll: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const url = `${API_BASE_URL}/products${query ? `?${query}` : ''}`;
-    const res = await fetch(url, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(url, 20000);
   },
   getById: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/products/${id}`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/products/${id}`, 30000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/products`, {
@@ -88,6 +139,8 @@ export const productApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/products');
+    invalidateApiCache('/warehouse');
     return handleResponse(res);
   },
   update: async (id, data) => {
@@ -96,6 +149,8 @@ export const productApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/products');
+    invalidateApiCache('/warehouse');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -103,6 +158,8 @@ export const productApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/products');
+    invalidateApiCache('/warehouse');
     return handleResponse(res);
   }
 };
@@ -110,8 +167,7 @@ export const productApi = {
 // ── Category API ─────────────────────────────────────────────────────────────
 export const categoryApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/categories`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/categories`, 60000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/categories`, {
@@ -119,6 +175,7 @@ export const categoryApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/categories');
     return handleResponse(res);
   },
   update: async (id, data) => {
@@ -127,6 +184,7 @@ export const categoryApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/categories');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -134,6 +192,7 @@ export const categoryApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/categories');
     return handleResponse(res);
   }
 };
@@ -141,8 +200,7 @@ export const categoryApi = {
 // ── Company API ──────────────────────────────────────────────────────────────
 export const companyApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/companies`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/companies`, 60000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/companies`, {
@@ -150,6 +208,7 @@ export const companyApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/companies');
     return handleResponse(res);
   },
   update: async (id, data) => {
@@ -158,6 +217,7 @@ export const companyApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/companies');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -165,6 +225,7 @@ export const companyApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/companies');
     return handleResponse(res);
   }
 };
@@ -172,12 +233,10 @@ export const companyApi = {
 // ── Offer API ────────────────────────────────────────────────────────────────
 export const offerApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/offers`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/offers`, 30000);
   },
   getActive: async () => {
-    const res = await fetch(`${API_BASE_URL}/offers/active`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/offers/active`, 30000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/offers`, {
@@ -185,6 +244,7 @@ export const offerApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/offers');
     return handleResponse(res);
   },
   update: async (id, data) => {
@@ -193,6 +253,7 @@ export const offerApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/offers');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -200,6 +261,7 @@ export const offerApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/offers');
     return handleResponse(res);
   }
 };
@@ -212,17 +274,20 @@ export const salesApi = {
       headers: getHeaders(),
       body: JSON.stringify(saleData)
     });
+    invalidateApiCache('/sales');
+    invalidateApiCache('/products');
+    invalidateApiCache('/customers');
+    invalidateApiCache('/accounts');
+    invalidateApiCache('/reports');
     return handleResponse(res);
   },
   getHistory: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const url = `${API_BASE_URL}/sales/history${query ? `?${query}` : ''}`;
-    const res = await fetch(url, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(url, 15000);
   },
   getById: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/sales/${id}`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/sales/${id}`, 30000);
   },
   payBalance: async (id, paymentData) => {
     const res = await fetch(`${API_BASE_URL}/sales/${id}/pay-balance`, {
@@ -230,6 +295,9 @@ export const salesApi = {
       headers: getHeaders(),
       body: JSON.stringify(paymentData)
     });
+    invalidateApiCache('/sales');
+    invalidateApiCache('/customers');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   salesReturn: async (returnData) => {
@@ -238,6 +306,10 @@ export const salesApi = {
       headers: getHeaders(),
       body: JSON.stringify(returnData)
     });
+    invalidateApiCache('/sales');
+    invalidateApiCache('/products');
+    invalidateApiCache('/customers');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   cancelSale: async (id, cancelData) => {
@@ -246,6 +318,10 @@ export const salesApi = {
       headers: getHeaders(),
       body: JSON.stringify(cancelData)
     });
+    invalidateApiCache('/sales');
+    invalidateApiCache('/products');
+    invalidateApiCache('/customers');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   }
 };
@@ -255,12 +331,10 @@ export const purchaseApi = {
   getAll: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const url = `${API_BASE_URL}/purchases${query ? `?${query}` : ''}`;
-    const res = await fetch(url, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(url, 15000);
   },
   getById: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/purchases/${id}`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/purchases/${id}`, 30000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/purchases`, {
@@ -268,6 +342,9 @@ export const purchaseApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/purchases');
+    invalidateApiCache('/vendors');
+    invalidateApiCache('/products');
     return handleResponse(res);
   },
   updateStatus: async (id, status) => {
@@ -276,6 +353,9 @@ export const purchaseApi = {
       headers: getHeaders(),
       body: JSON.stringify({ status })
     });
+    invalidateApiCache('/purchases');
+    invalidateApiCache('/vendors');
+    invalidateApiCache('/products');
     return handleResponse(res);
   },
   purchaseReturn: async (returnData) => {
@@ -284,14 +364,16 @@ export const purchaseApi = {
       headers: getHeaders(),
       body: JSON.stringify(returnData)
     });
+    invalidateApiCache('/purchases');
+    invalidateApiCache('/vendors');
+    invalidateApiCache('/products');
     return handleResponse(res);
   }
 };
 
 export const vendorApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/vendors`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/vendors`, 20000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/vendors`, {
@@ -299,6 +381,7 @@ export const vendorApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/vendors');
     return handleResponse(res);
   },
   update: async (id, data) => {
@@ -307,11 +390,11 @@ export const vendorApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/vendors');
     return handleResponse(res);
   },
   getLedger: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/vendors/${id}/ledger`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/vendors/${id}/ledger`, 15000);
   },
   recordPayment: async (id, paymentData) => {
     const res = await fetch(`${API_BASE_URL}/vendors/${id}/payments`, {
@@ -319,6 +402,8 @@ export const vendorApi = {
       headers: getHeaders(),
       body: JSON.stringify(paymentData)
     });
+    invalidateApiCache('/vendors');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -326,6 +411,7 @@ export const vendorApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/vendors');
     return handleResponse(res);
   }
 };
@@ -333,8 +419,7 @@ export const vendorApi = {
 // ── Customers API ────────────────────────────────────────────────────────────
 export const customerApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/customers`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/customers`, 20000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/customers`, {
@@ -342,6 +427,7 @@ export const customerApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/customers');
     return handleResponse(res);
   },
   update: async (id, data) => {
@@ -350,11 +436,11 @@ export const customerApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/customers');
     return handleResponse(res);
   },
   getLedger: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/customers/${id}/ledger`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/customers/${id}/ledger`, 15000);
   },
   recordPayment: async (id, paymentData) => {
     const res = await fetch(`${API_BASE_URL}/customers/${id}/payments`, {
@@ -362,6 +448,8 @@ export const customerApi = {
       headers: getHeaders(),
       body: JSON.stringify(paymentData)
     });
+    invalidateApiCache('/customers');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   }
 };
@@ -371,8 +459,7 @@ export const expenseApi = {
   getAll: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const url = `${API_BASE_URL}/expenses${query ? `?${query}` : ''}`;
-    const res = await fetch(url, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(url, 20000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/expenses`, {
@@ -380,6 +467,8 @@ export const expenseApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/expenses');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   delete: async (id) => {
@@ -387,11 +476,12 @@ export const expenseApi = {
       method: 'DELETE',
       headers: getHeaders()
     });
+    invalidateApiCache('/expenses');
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   getCategories: async () => {
-    const res = await fetch(`${API_BASE_URL}/expenses/categories`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/expenses/categories`, 60000);
   },
   createCategory: async (data) => {
     const res = await fetch(`${API_BASE_URL}/expenses/categories`, {
@@ -399,6 +489,7 @@ export const expenseApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/expenses/categories');
     return handleResponse(res);
   }
 };
@@ -406,8 +497,7 @@ export const expenseApi = {
 // ── Accounts API ─────────────────────────────────────────────────────────────
 export const accountApi = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE_URL}/accounts`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/accounts`, 20000);
   },
   create: async (data) => {
     const res = await fetch(`${API_BASE_URL}/accounts`, {
@@ -415,6 +505,7 @@ export const accountApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   updateOpeningBalances: async (balances) => {
@@ -423,21 +514,20 @@ export const accountApi = {
       headers: getHeaders(),
       body: JSON.stringify(balances)
     });
+    invalidateApiCache('/accounts');
     return handleResponse(res);
   },
   getStatement: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const url = `${API_BASE_URL}/accounts/statement${query ? `?${query}` : ''}`;
-    const res = await fetch(url, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(url, 15000);
   }
 };
 
 // ── Warehouse API ────────────────────────────────────────────────────────────
 export const warehouseApi = {
   getStock: async () => {
-    const res = await fetch(`${API_BASE_URL}/warehouse/stock`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/warehouse/stock`, 15000);
   },
   transferStock: async (data) => {
     const res = await fetch(`${API_BASE_URL}/warehouse/transfers`, {
@@ -445,11 +535,12 @@ export const warehouseApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/warehouse');
+    invalidateApiCache('/products');
     return handleResponse(res);
   },
   getTransfers: async () => {
-    const res = await fetch(`${API_BASE_URL}/warehouse/transfers`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/warehouse/transfers`, 15000);
   }
 };
 
@@ -457,39 +548,30 @@ export const warehouseApi = {
 export const reportApi = {
   getSalesReport: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
-    const res = await fetch(`${API_BASE_URL}/reports/sales${query ? `?${query}` : ''}`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/reports/sales${query ? `?${query}` : ''}`, 15000);
   },
   getPurchaseReport: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
-    const res = await fetch(`${API_BASE_URL}/reports/purchases${query ? `?${query}` : ''}`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/reports/purchases${query ? `?${query}` : ''}`, 15000);
   },
   getStockReport: async () => {
-    const res = await fetch(`${API_BASE_URL}/reports/stock`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/reports/stock`, 15000);
   },
   getExpenseReport: async () => {
-    const res = await fetch(`${API_BASE_URL}/reports/expenses`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/reports/expenses`, 15000);
   },
   getTrialBalance: async () => {
-    const res = await fetch(`${API_BASE_URL}/reports/trial-balance`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/reports/trial-balance`, 15000);
   },
   getBalanceSheet: async () => {
-    const res = await fetch(`${API_BASE_URL}/reports/balance-sheet`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/reports/balance-sheet`, 15000);
   }
 };
-
-
 
 // ── Settings & Audit API ─────────────────────────────────────────────────────
 export const settingsApi = {
   getSettings: async () => {
-    const res = await fetch(`${API_BASE_URL}/settings`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/settings`, 60000);
   },
   updateSettings: async (data) => {
     const res = await fetch(`${API_BASE_URL}/settings`, {
@@ -497,10 +579,10 @@ export const settingsApi = {
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
+    invalidateApiCache('/settings');
     return handleResponse(res);
   },
   getAuditLogs: async () => {
-    const res = await fetch(`${API_BASE_URL}/settings/audit-logs`, { headers: getHeaders() });
-    return handleResponse(res);
+    return cachedFetchGet(`${API_BASE_URL}/settings/audit-logs`, 15000);
   }
 };

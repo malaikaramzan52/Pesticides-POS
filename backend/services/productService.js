@@ -21,9 +21,14 @@ const getAllProducts = async (filters = {}) => {
     .populate('category_id', 'name code color')
     .populate('brand_id', 'name')
     .populate('unit_id', 'name key')
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
-  return products;
+  return products.map(p => ({
+    ...p,
+    id: p._id ? p._id.toString() : p.id,
+    total_stock: p.batches && p.batches.length > 0 ? p.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0) : 0
+  }));
 };
 
 const getProductById = async (id) => {
@@ -31,10 +36,15 @@ const getProductById = async (id) => {
     .populate('company_id', 'name code')
     .populate('category_id', 'name code color')
     .populate('brand_id', 'name')
-    .populate('unit_id', 'name key');
+    .populate('unit_id', 'name key')
+    .lean();
 
   if (!product) throw new ApiError(404, 'Product not found');
-  return product;
+  return {
+    ...product,
+    id: product._id ? product._id.toString() : product.id,
+    total_stock: product.batches && product.batches.length > 0 ? product.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0) : 0
+  };
 };
 
 const mongoose = require('mongoose');

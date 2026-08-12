@@ -4,7 +4,7 @@ const ApiError = require('../utils/apiError');
 
 const getCompanies = async (req, res, next) => {
   try {
-    const companies = await Company.find({}).sort({ name: 1 });
+    const companies = await Company.find({}).sort({ name: 1 }).lean();
     return successResponse(res, 'Companies fetched successfully', companies);
   } catch (error) {
     next(error);

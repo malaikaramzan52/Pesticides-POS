@@ -4,7 +4,7 @@ const SaleInvoice = require('../models/SaleInvoice');
 const ApiError = require('../utils/apiError');
 
 const getAllCustomers = async () => {
-  return await Customer.find({}).sort({ createdAt: -1 });
+  return await Customer.find({}).sort({ createdAt: -1 }).lean();
 };
 
 const createCustomer = async (custData) => {
