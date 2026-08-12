@@ -21,6 +21,9 @@ customerSchema.virtual('available_credit').get(function () {
   return Math.max(0, (this.credit_limit || 0) - (this.outstanding_balance || 0));
 });
 
+customerSchema.index({ createdAt: -1 });
+customerSchema.index({ name: 1, code: 1 });
+
 customerSchema.set('toJSON', { virtuals: true });
 customerSchema.set('toObject', { virtuals: true });
 

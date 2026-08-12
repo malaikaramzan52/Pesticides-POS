@@ -34,6 +34,10 @@ productSchema.virtual('total_stock').get(function () {
   return this.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
 });
 
+productSchema.index({ createdAt: -1 });
+productSchema.index({ name: 1, status: 1 });
+productSchema.index({ category_id: 1, company_id: 1 });
+
 productSchema.set('toJSON', { virtuals: true });
 productSchema.set('toObject', { virtuals: true });
 

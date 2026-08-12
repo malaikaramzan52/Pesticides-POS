@@ -81,7 +81,16 @@ export default function POSScreen({
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogSearch, setCatalogSearch] = useState('');
   const ITEMS_PER_PAGE = 7;
-  const [posProductsList, setPosProductsList] = useState(PRODUCTS);
+  const [posProductsList, setPosProductsList] = useState(() => {
+    try {
+      const cached = localStorage.getItem('agro_pos_products_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return PRODUCTS;
+  });
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const barcodeRef = useRef(null);
@@ -92,37 +101,39 @@ export default function POSScreen({
     return () => clearInterval(timer);
   }, []);
 
-  const fetchPOSProducts = async () => {
-    try {
-      const data = await productApi.getAll();
-      if (data && Array.isArray(data) && data.length > 0) {
-        const merged = [...data];
-        PRODUCTS.forEach(p => {
-          if (!merged.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
-            merged.push(p);
-          }
-        });
-        data.forEach(p => {
-          const idx = PRODUCTS.findIndex(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code);
-          if (idx !== -1) {
-            PRODUCTS[idx] = { ...PRODUCTS[idx], ...p };
-          } else {
-            PRODUCTS.unshift(p);
-          }
-        });
-        setPosProductsList(merged);
-      }
-    } catch (e) {}
-  };
-
+  // Parallel background hydration for products & customers
   useEffect(() => {
-    fetchPOSProducts();
-  }, []);
-
-  useEffect(() => {
-    const fetchCustomersList = async () => {
+    let isMounted = true;
+    const syncPOSData = async () => {
       try {
-        const custs = await customerApi.getAll();
+        const [data, custs] = await Promise.all([
+          productApi.getAll().catch(() => null),
+          customerApi.getAll().catch(() => null)
+        ]);
+
+        if (!isMounted) return;
+
+        if (data && Array.isArray(data) && data.length > 0) {
+          const merged = [...data];
+          PRODUCTS.forEach(p => {
+            if (!merged.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
+              merged.push(p);
+            }
+          });
+          data.forEach(p => {
+            const idx = PRODUCTS.findIndex(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code);
+            if (idx !== -1) {
+              PRODUCTS[idx] = { ...PRODUCTS[idx], ...p };
+            } else {
+              PRODUCTS.unshift(p);
+            }
+          });
+          setPosProductsList(merged);
+          try {
+            localStorage.setItem('agro_pos_products_cache', JSON.stringify(merged));
+          } catch (e) {}
+        }
+
         if (custs && Array.isArray(custs) && custs.length > 0) {
           custs.forEach(c => {
             if (!CUSTOMERS.some(ic => (ic._id || ic.id) === (c._id || c.id) || ic.code === c.code)) {
@@ -132,7 +143,9 @@ export default function POSScreen({
         }
       } catch (e) {}
     };
-    fetchCustomersList();
+
+    syncPOSData();
+    return () => { isMounted = false; };
   }, []);
 
   useEffect(() => {

@@ -14,4 +14,7 @@ const expenseSchema = new mongoose.Schema({
   status: { type: String, enum: ['Paid', 'Pending'], default: 'Paid' }
 }, { timestamps: true });
 
+expenseSchema.index({ createdAt: -1 });
+expenseSchema.index({ date: -1 });
+
 module.exports = mongoose.model('Expense', expenseSchema);

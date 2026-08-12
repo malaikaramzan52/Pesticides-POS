@@ -71,4 +71,9 @@ const saleInvoiceSchema = new mongoose.Schema({
   items: [saleInvoiceItemSchema]
 }, { timestamps: true });
 
+saleInvoiceSchema.index({ createdAt: -1 });
+saleInvoiceSchema.index({ customer_id: 1, createdAt: -1 });
+saleInvoiceSchema.index({ payment_status: 1 });
+saleInvoiceSchema.index({ date: -1 });
+
 module.exports = mongoose.model('SaleInvoice', saleInvoiceSchema);

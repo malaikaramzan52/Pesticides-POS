@@ -104,14 +104,27 @@ export default function App() {
     if (mainEl) mainEl.scrollTop = 0;
   }, [activeTab]);
   
-  // Shared Live POS States
-  const [invoices, setInvoices] = useState([]);
+  // Shared Live POS States with local cache initialization for 0ms initial render
+  const [invoices, setInvoices] = useState(() => {
+    try {
+      const cached = localStorage.getItem('agro_pos_invoices_cache');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return [];
+  });
   const [heldSales, setHeldSales] = useState(MOCK_HELD_SALES);
   const [auditLogs, setAuditLogs] = useState([]);
-  const [expenses, setExpenses] = useState([]);
+  const [expenses, setExpenses] = useState(() => {
+    try {
+      const cached = localStorage.getItem('agro_pos_expenses_cache');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return [];
+  });
 
-  // Live Backend Data Hydration
+  // Live Backend Data Hydration in background
   useEffect(() => {
+    let isMounted = true;
     const loadBackendData = async () => {
       try {
         const [salesRes, expRes, logRes] = await Promise.all([
@@ -119,14 +132,24 @@ export default function App() {
           expenseApi.getAll().catch(() => []),
           settingsApi.getAuditLogs().catch(() => [])
         ]);
-        if (salesRes && Array.isArray(salesRes)) setInvoices(salesRes);
-        if (expRes && Array.isArray(expRes)) setExpenses(expRes);
+
+        if (!isMounted) return;
+
+        if (salesRes && Array.isArray(salesRes)) {
+          setInvoices(salesRes);
+          try { localStorage.setItem('agro_pos_invoices_cache', JSON.stringify(salesRes)); } catch (e) {}
+        }
+        if (expRes && Array.isArray(expRes)) {
+          setExpenses(expRes);
+          try { localStorage.setItem('agro_pos_expenses_cache', JSON.stringify(expRes)); } catch (e) {}
+        }
         if (logRes && Array.isArray(logRes)) setAuditLogs(logRes);
       } catch (err) {
         console.log('Backend sync warning:', err.message);
       }
     };
     loadBackendData();
+    return () => { isMounted = false; };
   }, []);
 
   // Refresh invoices from DB (called after return/cancel)
