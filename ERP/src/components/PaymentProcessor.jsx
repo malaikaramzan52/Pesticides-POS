@@ -120,27 +120,33 @@ export default function PaymentProcessor({
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-500 uppercase">Name on Card</label>
+              <label className="text-[10px] font-bold text-gray-500 uppercase">Cardholder / Slip Name</label>
               <input
                 type="text"
-                autoComplete="new-password"
-                name="c_holder_name_no_autofill"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                data-1p-ignore="true"
+                aria-autocomplete="none"
                 value={paymentDetails.card_name || ''}
                 onChange={e => updateDetail('card_name', e.target.value)}
-                placeholder="Cardholder Name"
+                placeholder="e.g. Ali Khan"
                 className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-500 uppercase">Card Number (Last 4)</label>
+              <label className="text-[10px] font-bold text-gray-500 uppercase">Card Digits (Last 4)</label>
               <input
                 type="text"
-                autoComplete="new-password"
-                name="c_num_no_autofill"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                data-1p-ignore="true"
+                aria-autocomplete="none"
                 maxLength="4"
                 value={paymentDetails.card_number || ''}
                 onChange={e => updateDetail('card_number', e.target.value.replace(/\D/g, ''))}
-                placeholder="****"
+                placeholder="e.g. 5678"
                 className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold focus:border-green-600 focus:outline-none"
               />
             </div>
@@ -148,7 +154,11 @@ export default function PaymentProcessor({
               <label className="text-[10px] font-bold text-gray-500 uppercase">Approval / Auth Code</label>
               <input
                 type="text"
-                autoComplete="new-password"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                data-1p-ignore="true"
+                aria-autocomplete="none"
                 value={paymentDetails.auth_code || ''}
                 onChange={e => updateDetail('auth_code', e.target.value)}
                 placeholder="Optional"

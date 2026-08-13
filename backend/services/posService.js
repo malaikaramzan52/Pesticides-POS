@@ -256,9 +256,10 @@ const processSalesReturn = async (returnData, currentUser = null) => {
     const returnQty = Number(item.qty || item.quantity) || 0;
     if (returnQty <= 0) continue;
 
-    // Find corresponding invoice item by name match
+    // Find corresponding invoice item by product_id or name match
     const invoiceItem = invoice.items.find(
-      ii => ii.product_name?.toLowerCase() === (item.name || '').toLowerCase()
+      ii => (item.product_id && ii.product_id && ii.product_id.toString() === item.product_id.toString()) ||
+            ii.product_name?.toLowerCase().trim() === (item.name || item.product_name || '').toLowerCase().trim()
     );
 
     if (invoiceItem) {
@@ -269,7 +270,11 @@ const processSalesReturn = async (returnData, currentUser = null) => {
         throw new ApiError(400, `"${invoiceItem.product_name}" has already been fully returned.`);
       }
 
-      const validQty = Math.min(returnQty, maxReturnable);
+      if (returnQty > maxReturnable) {
+        throw new ApiError(400, `Return quantity for "${invoiceItem.product_name}" (${returnQty}) exceeds remaining returnable quantity (${maxReturnable}).`);
+      }
+
+      const validQty = returnQty;
 
       // Restore stock in product batches
       let product = null;

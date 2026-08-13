@@ -44,14 +44,15 @@ function SectionHeader({ icon: Icon, color, title }) {
 
 // ─── Sales Return Form ────────────────────────────────────────────────────────
 function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotificationToast, setPrintRecord }) {
-  const [invoiceQuery, setInvoiceQuery]   = useState('');
-  const [loadedInvoice, setLoadedInvoice] = useState(null);
-  const [returnItems,  setReturnItems]    = useState([]);
-  const [refundMethod, setRefundMethod]   = useState('Cash');
-  const [paymentDetails, setPaymentDetails] = useState({});
-  const [refundAmount, setRefundAmount]   = useState('');
-  const [error, setError]                 = useState('');
-  const [success, setSuccess]             = useState('');
+  const [invoiceQuery, setInvoiceQuery]       = useState('');
+  const [loadedInvoice, setLoadedInvoice]     = useState(null);
+  const [returnItems, setReturnItems]         = useState([]);
+  const [productSearch, setProductSearch]     = useState('');
+  const [refundMethod, setRefundMethod]       = useState('Cash');
+  const [paymentDetails, setPaymentDetails]   = useState({});
+  const [refundAmount, setRefundAmount]       = useState('');
+  const [error, setError]                     = useState('');
+  const [success, setSuccess]                 = useState('');
 
   const handleSearch = (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -84,66 +85,75 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
       return;
     }
 
-    // Check if all items in the invoice are already fully returned
-    const allItemsReturned = inv.items && inv.items.length > 0 && inv.items.every(item => {
+    // Process all products included in this sale
+    const items = (inv.items || []).map(item => {
+      const sold = Number(item.quantity || item.qty || 0);
       const returned = Number(item.returned_qty || 0);
-      const original = Number(item.quantity || 0);
-      return returned >= original;
+      const maxReturn = Math.max(0, sold - returned);
+      return {
+        product_id: item.product_id || item.id || item._id,
+        product_name: item.product_name || item.name || 'Unknown Product',
+        code: item.code || item.sku || '',
+        quantity: sold,
+        returned_qty: returned,
+        maxReturnQty: maxReturn,
+        returnQty: 0, // Default Return Qty = 0
+        price: Number(item.price || item.rate || 0),
+        unit: item.unit || 'Unit',
+        reason: REASONS_SALE[0],
+        isFullyReturned: maxReturn <= 0
+      };
     });
 
-    // Block fully-returned invoices immediately
-    if (inv.return_status === 'Full' || inv.status === 'Fully Returned' || allItemsReturned) {
-      setError(`Invoice "${inv.invoice_no}" has already been fully returned. No further returns allowed.`);
-      setLoadedInvoice(null);
-      return;
-    }
-
-    // Filter to returnable items only
-    const returnableItems = (inv.items || []).map(item => {
-      const returned = Number(item.returned_qty || 0);
-      const original = Number(item.quantity || 0);
-      const available = Math.max(0, original - returned);
-      return {
-        ...item,
-        returnQty: available,
-        maxReturnQty: available,
-        reason: REASONS_SALE[0]
-      };
-    }).filter(item => item.maxReturnQty > 0);
-
-    if (returnableItems.length === 0) {
-      setError(`Invoice "${inv.invoice_no}" has already been fully returned. No further returns allowed.`);
+    if (items.length === 0) {
+      setError(`Invoice "${inv.invoice_no}" contains no products.`);
       setLoadedInvoice(null);
       return;
     }
 
     setLoadedInvoice(inv);
-    setReturnItems(returnableItems);
+    setReturnItems(items);
+    setProductSearch('');
   };
 
-  const setQty = (idx, val) => {
-    const maxQ = returnItems[idx]?.maxReturnQty ?? (loadedInvoice?.items[idx]?.quantity || 999);
-    const q = Math.max(0, Math.min(maxQ, parseInt(val) || 0));
-    setReturnItems(p => p.map((item, i) => i === idx ? { ...item, returnQty: q } : item));
+  const updateQty = (idx, val) => {
+    const item = returnItems[idx];
+    if (!item || item.isFullyReturned) return;
+    const parsed = parseInt(val, 10);
+    const safeQty = Math.max(0, Math.min(item.maxReturnQty, isNaN(parsed) ? 0 : parsed));
+    setReturnItems(prev => prev.map((it, i) => i === idx ? { ...it, returnQty: safeQty } : it));
   };
 
   const setReason = (idx, val) => {
-    setReturnItems(p => p.map((item, i) => i === idx ? { ...item, reason: val } : item));
+    setReturnItems(prev => prev.map((it, i) => i === idx ? { ...it, reason: val } : it));
   };
 
-  const refundTotal = returnItems.reduce((s, item) => s + item.returnQty * item.price, 0);
-  const hasReturn   = refundTotal > 0;
+  // Product Search Filter (Section 5)
+  const filteredItems = useMemo(() => {
+    if (!productSearch.trim()) return returnItems;
+    const q = productSearch.toLowerCase().trim();
+    return returnItems.filter(item =>
+      (item.product_name || '').toLowerCase().includes(q) ||
+      (item.code || '').toLowerCase().includes(q)
+    );
+  }, [returnItems, productSearch]);
+
+  // Return Summary (Section 6)
+  const selectedItems = useMemo(() => returnItems.filter(i => i.returnQty > 0), [returnItems]);
+  const selectedProductsCount = selectedItems.length;
+  const totalReturnQty = selectedItems.reduce((sum, item) => sum + item.returnQty, 0);
+  const refundTotal = selectedItems.reduce((sum, item) => sum + (item.returnQty * item.price), 0);
+  const hasReturn = totalReturnQty > 0;
 
   React.useEffect(() => {
-    if (refundTotal > 0 && refundAmount === '') {
-      setRefundAmount(refundTotal);
-    }
-  }, [refundTotal, refundAmount]);
+    setRefundAmount(refundTotal);
+  }, [refundTotal]);
 
   const handleConfirm = async () => {
-    if (!hasReturn) { setError('Please enter return quantity for at least one item.'); return; }
-    
-    const returnedItems = returnItems.filter(i => i.returnQty > 0);
+    if (!hasReturn) {
+      setError('Please select at least one product to return.');
+      return;
+    }
 
     // Validate Payment Details
     if (refundMethod === 'Card') {
@@ -163,8 +173,8 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
       }
     }
 
-    if (refundMethod !== 'Credit' && parseFloat(refundAmount) < refundTotal) {
-      setError(`Refund amount (Rs. ${refundAmount}) cannot be less than Total Refund (Rs. ${refundTotal}).`);
+    if (refundMethod !== 'Credit' && parseFloat(refundAmount) > refundTotal) {
+      setError(`Refund amount (Rs. ${refundAmount}) cannot exceed Total Refund (Rs. ${refundTotal}).`);
       return;
     }
 
@@ -172,17 +182,15 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
     const currentWarehouseStock = typeof getWarehouseStock === 'function' ? getWarehouseStock() : [];
     let updatedWarehouseStock = JSON.parse(JSON.stringify(currentWarehouseStock));
 
-    returnedItems.forEach(item => {
-      const p = PRODUCTS.find(prod => prod.id === (item.product_id || item.product?.id || item.product?._id) || prod.name === item.product_name);
+    selectedItems.forEach(item => {
+      const p = PRODUCTS.find(prod => prod.id === item.product_id || prod.name === item.product_name);
       if (p) {
         if (!p.batches || p.batches.length === 0) {
-          p.batches = [{ id: `B_${Date.now()}`, batch_no: item.batch_no || 'DEFAULT', stock_qty: item.returnQty }];
+          p.batches = [{ id: `B_${Date.now()}`, batch_no: 'DEFAULT', stock_qty: item.returnQty }];
         } else {
-          const targetBatch = p.batches.find(b => b.batch_no === item.batch_no) || p.batches[0];
-          targetBatch.stock_qty = (targetBatch.stock_qty || 0) + item.returnQty;
+          p.batches[0].stock_qty = (p.batches[0].stock_qty || 0) + item.returnQty;
         }
         
-        // Sync WarehouseStock pos_counter_qty
         const totalStock = p.batches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
         const whIdx = updatedWarehouseStock.findIndex(w => w.product_id === p.id);
         if (whIdx >= 0) {
@@ -199,8 +207,8 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
       date: new Date().toISOString().split('T')[0],
       type: 'Sales Return',
       invoice_no: loadedInvoice.invoice_no,
-      customer: loadedInvoice.customer_name,
-      items: returnedItems.map(i => ({ name: i.product_name, qty: i.returnQty, rate: i.price })),
+      customer: loadedInvoice.customer_name || loadedInvoice.customer || 'Walk-in Customer',
+      items: selectedItems.map(i => ({ name: i.product_name, qty: i.returnQty, rate: i.price, reason: i.reason })),
       refund_total: refundTotal,
       refund_method: refundMethod,
       refund_details: paymentDetails,
@@ -211,21 +219,22 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
       await salesApi.salesReturn({
         invoice_no: loadedInvoice.invoice_no,
         customer: loadedInvoice.customer_name || loadedInvoice.customer || 'Walk-in Customer',
-        items: returnedItems.map(i => ({
-          name: i.product_name || i.name || 'Unknown Product',
+        items: selectedItems.map(i => ({
+          product_id: i.product_id,
+          name: i.product_name,
           qty: i.returnQty,
-          rate: i.price || i.rate || 0,
-          reason: i.reason || 'Farmer Return'
+          rate: i.price,
+          reason: i.reason
         })),
         refund_total: refundTotal,
-        refund_method: refundMethod
+        refund_method: refundMethod,
+        refund_details: paymentDetails
       });
 
       if (triggerNotificationToast) {
         triggerNotificationToast('Sales Refund Processed', `Refund of Rs. ${refundTotal.toLocaleString()} issued successfully.`, 'success');
       }
 
-      // Refresh invoice list from DB so return_status is immediately updated
       if (onReturnSaved) await onReturnSaved(rec);
 
     } catch(err) {
@@ -234,7 +243,7 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
         triggerNotificationToast('Return Failed', `Database error: ${err.message || 'Please try again.'}`, 'error');
       }
       setError(`Return failed: ${err.message || 'Server error. Please try again.'}`);
-      return; // Don't clear form on failure
+      return;
     }
 
     if (addAuditLog) {
@@ -242,14 +251,14 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
     }
 
     setSuccess(rec);
-    setLoadedInvoice(null); setReturnItems([]); setInvoiceQuery(''); setError('');
+    setLoadedInvoice(null); setReturnItems([]); setInvoiceQuery(''); setError(''); setProductSearch('');
   };
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 space-y-5">
-      <SectionHeader icon={Package} color="bg-red-500" title="Sales Return (Customer → Store)" />
+      <SectionHeader icon={Package} color="bg-green-600" title="Sales Return (Customer → Store)" />
 
-      {/* Search Invoice */}
+      {/* Section 1: Invoice Loading */}
       <form onSubmit={handleSearch} className="flex gap-2">
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -260,11 +269,11 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
               if (error) setError('');
               if (success) setSuccess('');
             }}
-            className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-800 focus:border-green-500 focus:ring-2 focus:ring-green-500/10 focus:outline-none transition"
+            className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold text-gray-800 focus:border-green-500 focus:ring-2 focus:ring-green-500/10 focus:outline-none transition"
           />
         </div>
-        <button type="submit" className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer">
-          Load
+        <button type="submit" className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
+          <Search size={13} /> Load
         </button>
       </form>
 
@@ -289,76 +298,201 @@ function SalesReturnForm({ invoices, onReturnSaved, addAuditLog, triggerNotifica
 
       {/* Loaded Invoice */}
       {loadedInvoice && (
-        <div className="space-y-4">
-          {/* Invoice summary */}
-          <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 flex items-center justify-between">
+        <div className="space-y-5">
+          {/* Section 1: Invoice Information Summary */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             <div>
-              <span className="text-xs font-extrabold text-green-700 font-mono">{loadedInvoice.invoice_no}</span>
-              <span className="text-[10px] text-gray-400 ml-2">{loadedInvoice.date}</span>
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">Invoice Number</span>
+              <span className="font-extrabold text-green-700 font-mono text-sm">{loadedInvoice.invoice_no}</span>
             </div>
-            <div className="text-right">
-              <span className="text-[10px] text-gray-400 block">Customer</span>
-              <span className="text-xs font-bold text-gray-800">{loadedInvoice.customer_name}</span>
+            <div>
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">Sale Date</span>
+              <span className="font-bold text-gray-800">{loadedInvoice.date}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">Customer</span>
+              <span className="font-bold text-gray-800 truncate block">{loadedInvoice.customer_name || loadedInvoice.customer || 'Walk-in Customer'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">Original Sale Total</span>
+              <span className="font-black text-gray-900 font-mono">Rs. {Number(loadedInvoice.grand_total || loadedInvoice.total || 0).toLocaleString()}</span>
             </div>
           </div>
 
-          {/* Items */}
-          <div className="space-y-2.5">
-            {returnItems.map((item, idx) => (
-              <div key={idx} className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="font-bold text-gray-900 text-xs block truncate">{item.product_name}</span>
-                    <span className="text-[10px] text-gray-400">Sold: {item.quantity} × Rs. {item.price}</span>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <span className="text-[10px] text-gray-400 block">Return Amt</span>
-                    <span className="font-black text-green-700 text-sm">Rs. {(item.returnQty * item.price).toLocaleString()}</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Fixed Qty */}
-                  <div>
-                    <label className="text-[9px] text-gray-400 font-bold uppercase block mb-1">Return Qty</label>
-                    <div className="flex items-center px-3 py-1.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 text-xs font-black">
-                      {item.returnQty}
-                    </div>
-                  </div>
-                  {/* Reason */}
-                  <div>
-                    <label className="text-[9px] text-gray-400 font-bold uppercase block mb-1">Reason</label>
-                    <select value={item.reason} onChange={e => setReason(idx, e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-[11px] font-semibold text-gray-700 bg-white focus:border-green-500 focus:outline-none transition">
-                      {REASONS_SALE.map(r => <option key={r}>{r}</option>)}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Refund summary & confirm */}
-          {hasReturn && (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-extrabold text-gray-700">Total Refund</span>
-                <span className="text-lg font-black text-green-700 font-mono">Rs. {refundTotal.toLocaleString()}</span>
-              </div>
-              <div className="space-y-1 mt-2">
-                <PaymentProcessor
-                  paymentMethod={refundMethod}
-                  setPaymentMethod={setRefundMethod}
-                  grandTotal={refundTotal}
-                  receivedAmount={refundAmount}
-                  setReceivedAmount={setRefundAmount}
-                  paymentDetails={paymentDetails}
-                  setPaymentDetails={setPaymentDetails}
-                  layout="vertical"
-                  transactionType="out"
+          {/* Section 2: Products in This Sale */}
+          <div className="border-t border-gray-100 pt-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-xs font-black text-gray-800 uppercase tracking-wider flex items-center gap-2">
+                <Package size={14} className="text-green-600" /> Products in This Sale ({returnItems.length})
+              </h3>
+              
+              {/* Section 5: Search Products in this invoice */}
+              <div className="relative w-full sm:w-64">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search products in this invoice..."
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 border border-gray-300 rounded-lg text-xs font-semibold text-gray-800 focus:border-green-500 focus:outline-none transition"
                 />
               </div>
-              <button onClick={handleConfirm} className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer flex items-center justify-center gap-2">
-                <CheckCircle2 size={13} /> Process Sales Return
+            </div>
+
+            {/* Product List */}
+            {filteredItems.length === 0 ? (
+              <div className="p-6 text-center text-xs text-gray-400 font-medium bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                No products match "{productSearch}".
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredItems.map((item) => {
+                  const originalIndex = returnItems.findIndex(it => (it.product_id || it.product_name) === (item.product_id || item.product_name));
+                  const itemRefund = item.returnQty * item.price;
+                  return (
+                    <div key={originalIndex} className={`bg-white border rounded-xl p-4 shadow-sm space-y-3 transition ${
+                      item.returnQty > 0 ? 'border-green-400 ring-1 ring-green-400/20 bg-green-50/20' : 'border-gray-200 hover:border-gray-300'
+                    }`}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-2.5">
+                        <div>
+                          <span className="font-bold text-gray-900 text-sm block">{item.product_name}</span>
+                          <span className="text-[11px] text-gray-500 font-medium">Unit Price: Rs. {item.price.toLocaleString()}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-gray-600 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                          <div>Sold: <span className="font-bold text-gray-800">{item.quantity}</span></div>
+                          <div className="text-gray-300">|</div>
+                          <div>Already Returned: <span className="font-bold text-red-600">{item.returned_qty}</span></div>
+                          <div className="text-gray-300">|</div>
+                          <div>Max Returnable: <span className="font-bold text-green-700">{item.maxReturnQty}</span></div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                        {/* Return Qty Control */}
+                        <div>
+                          <label className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1">Return Qty</label>
+                          {item.isFullyReturned ? (
+                            <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg text-xs font-extrabold">
+                              <AlertTriangle size={12} /> Fully Returned
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => updateQty(originalIndex, item.returnQty - 1)}
+                                disabled={item.returnQty <= 0}
+                                className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:hover:bg-gray-100 flex items-center justify-center font-bold text-gray-700 transition cursor-pointer"
+                              >
+                                <Minus size={13} />
+                              </button>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.maxReturnQty}
+                                value={item.returnQty}
+                                onChange={e => updateQty(originalIndex, e.target.value)}
+                                className="w-16 h-8 text-center border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:border-green-500 focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updateQty(originalIndex, item.returnQty + 1)}
+                                disabled={item.returnQty >= item.maxReturnQty}
+                                className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:hover:bg-gray-100 flex items-center justify-center font-bold text-gray-700 transition cursor-pointer"
+                              >
+                                <Plus size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Reason Selection */}
+                        <div>
+                          <label className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1">Return Reason</label>
+                          <select
+                            disabled={item.isFullyReturned}
+                            value={item.reason}
+                            onChange={e => setReason(originalIndex, e.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 bg-white focus:border-green-500 focus:outline-none transition disabled:bg-gray-100 disabled:text-gray-400"
+                          >
+                            {REASONS_SALE.map(r => <option key={r}>{r}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Line Refund Amount */}
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] text-gray-400 font-bold uppercase block">Refund Amount</span>
+                          <span className={`text-sm font-black font-mono ${itemRefund > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+                            Rs. {itemRefund.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Section 6: Return Summary Card */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2">
+            <div className="flex justify-between items-center pb-2 border-b border-gray-200">
+              <span className="text-xs font-black uppercase text-gray-700 tracking-wider">Return Summary</span>
+              {hasReturn ? (
+                <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-0.5 rounded-full border border-green-200">
+                  {selectedProductsCount} product(s) selected
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">
+                  No products selected
+                </span>
+              )}
+            </div>
+
+            {hasReturn ? (
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-1">
+                <div className="flex gap-6 text-xs">
+                  <div>
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Selected Products</span>
+                    <span className="font-extrabold text-gray-800">{selectedProductsCount}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Return Qty</span>
+                    <span className="font-extrabold text-gray-800">{totalReturnQty} units</span>
+                  </div>
+                </div>
+                <div className="text-left sm:text-right">
+                  <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Refund</span>
+                  <span className="text-xl font-black text-green-700 font-mono">Rs. {refundTotal.toLocaleString()}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-2 text-center text-xs text-gray-500 font-medium">
+                No products selected for return. Set Return Qty &gt; 0 for products you want to return.
+              </div>
+            )}
+          </div>
+
+          {/* Section 7, 8 & 9: Payment Method & Process Return */}
+          {hasReturn && (
+            <div className="bg-green-50/60 border border-green-200 rounded-xl p-4 space-y-4 animate-in fade-in duration-200">
+              <PaymentProcessor
+                paymentMethod={refundMethod}
+                setPaymentMethod={setRefundMethod}
+                grandTotal={refundTotal}
+                receivedAmount={refundAmount}
+                setReceivedAmount={setRefundAmount}
+                paymentDetails={paymentDetails}
+                setPaymentDetails={setPaymentDetails}
+                layout="vertical"
+                transactionType="out"
+              />
+
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 size={15} /> Process Sales Return
               </button>
             </div>
           )}

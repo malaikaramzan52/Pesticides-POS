@@ -37,7 +37,14 @@ const purchaseOrderSchema = new mongoose.Schema({
     default: 'None'
   },
   total_returned_amount: { type: Number, default: 0 },
-  payment_method: { type: String, default: 'Bank Transfer' },
+  payment_method: { type: String, default: 'Cash' },
+  paid_amount: { type: Number, default: 0 },
+  payment_status: { 
+    type: String, 
+    enum: ['Paid', 'Partial', 'Unpaid'], 
+    default: 'Paid' 
+  },
+  account_name: { type: String, default: 'Cash in Hand' },
   payment_details: { type: Object, default: {} },
   items: [poItemSchema],
   itemsCount: { type: Number, default: 0 },

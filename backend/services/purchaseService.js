@@ -20,11 +20,32 @@ const createPO = async (poData) => {
   const count = await PurchaseOrder.countDocuments();
   const po_no = poData.po_no || `PO-2026-${String(count + 1).padStart(3, '0')}`;
   const itemsCount = poData.items ? poData.items.reduce((s, i) => s + (Number(i.qty) || 0), 0) : 0;
+  const total = Number(poData.total) || 0;
+
+  const payment_method = poData.payment_method || 'Cash';
+  let paid_amount = poData.paid_amount !== undefined ? Number(poData.paid_amount) : (payment_method === 'Credit / On Account' ? 0 : total);
+  if (isNaN(paid_amount)) paid_amount = 0;
+  paid_amount = Math.min(Math.max(0, paid_amount), total);
+
+  let payment_status = 'Paid';
+  if (paid_amount >= total) {
+    payment_status = 'Paid';
+  } else if (paid_amount > 0) {
+    payment_status = 'Partial';
+  } else {
+    payment_status = 'Unpaid';
+  }
 
   const po = await PurchaseOrder.create({
     ...poData,
     po_no,
-    itemsCount
+    itemsCount,
+    total,
+    payment_method,
+    paid_amount,
+    payment_status,
+    account_name: poData.account_name || 'Cash in Hand',
+    payment_details: poData.payment_details || {}
   });
 
   // Auto-add stock to Product batches & WarehouseStock
@@ -64,6 +85,30 @@ const createPO = async (poData) => {
             { upsert: true }
           );
         }
+      }
+    }
+  }
+
+  // Update Vendor Outstanding Balance & Payment Ledger if PO is received/created
+  if (po.status === 'Received') {
+    const vendor = await Vendor.findOne({ name: { $regex: new RegExp(`^${po.supplier}$`, 'i') } });
+    if (vendor) {
+      const remainingUnpaid = Math.max(0, total - paid_amount);
+      vendor.outstanding_balance = (vendor.outstanding_balance || 0) + remainingUnpaid;
+      await vendor.save();
+
+      if (paid_amount > 0) {
+        await VendorPayment.create({
+          vendor_id: vendor._id,
+          vendor_name: vendor.name,
+          po_id: po._id,
+          date: po.date || new Date().toISOString().split('T')[0],
+          amount: paid_amount,
+          payment_method: payment_method,
+          ref_no: po.po_no,
+          type: 'PO Purchase',
+          notes: `Purchase Order Payment (${payment_status}) via ${po.account_name || payment_method}`
+        });
       }
     }
   }
@@ -114,28 +159,34 @@ const updatePOStatus = async (id, status, currentUser = null) => {
       }
     }
 
-    // Update Vendor Outstanding Balance
-    const vendor = await Vendor.findOne({ name: po.supplier });
+    // Update Vendor Outstanding Balance based on remaining unpaid amount
+    const vendor = await Vendor.findOne({ name: { $regex: new RegExp(`^${po.supplier}$`, 'i') } });
     if (vendor) {
-      vendor.outstanding_balance += po.total;
+      const totalAmount = Number(po.total) || 0;
+      const paidAmount = Number(po.paid_amount) || 0;
+      const remainingUnpaid = Math.max(0, totalAmount - paidAmount);
+
+      vendor.outstanding_balance = (vendor.outstanding_balance || 0) + remainingUnpaid;
       await vendor.save();
 
-      await VendorPayment.create({
-        vendor_id: vendor._id,
-        vendor_name: vendor.name,
-        po_id: po._id,
-        date: new Date().toISOString().split('T')[0],
-        amount: po.total,
-        payment_method: po.payment_method || 'Bank Transfer',
-        ref_no: po.po_no,
-        type: 'PO Purchase',
-        notes: `Purchase Order Received ${po.po_no}`
-      });
+      if (paidAmount > 0) {
+        await VendorPayment.create({
+          vendor_id: vendor._id,
+          vendor_name: vendor.name,
+          po_id: po._id,
+          date: new Date().toISOString().split('T')[0],
+          amount: paidAmount,
+          payment_method: po.payment_method || 'Cash',
+          ref_no: po.po_no,
+          type: 'PO Purchase',
+          notes: `Purchase Order Received ${po.po_no} (${po.payment_status || 'Paid'})`
+        });
+      }
     }
 
     await auditService.logAction(
       'PO Received',
-      `Purchase Order ${po.po_no} received. Total: Rs. ${po.total}`,
+      `Purchase Order ${po.po_no} received. Total: Rs. ${po.total}, Paid: Rs. ${po.paid_amount || 0}`,
       currentUser ? currentUser.name : 'Admin'
     );
   }

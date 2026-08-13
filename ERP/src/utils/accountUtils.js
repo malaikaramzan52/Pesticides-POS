@@ -235,9 +235,9 @@ export const getAccountStatementData = ({
   // 3. Purchase Orders (Money Out)
   posList.forEach(po => {
     if (po.status !== 'Cancelled') {
-      const poAcc = normalizeAccountName(po.payment_method || 'Bank Transfer');
+      const poAcc = normalizeAccountName(po.account_name || po.payment_method || 'Bank Transfer');
       if (poAcc === targetAcc) {
-        const amt = Number(po.total || 0);
+        const amt = Number(po.paid_amount !== undefined ? po.paid_amount : (po.total || 0));
         if (amt > 0) {
           rawRows.push({
             id: `PO-${po.id}`,

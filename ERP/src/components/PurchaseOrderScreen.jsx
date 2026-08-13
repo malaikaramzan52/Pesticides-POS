@@ -16,9 +16,13 @@ import {
   DollarSign,
   Save,
   Truck,
+  CreditCard,
+  Wallet,
+  Banknote,
 } from 'lucide-react';
 import { PRODUCTS, getStoredData, setStoredData, saveProductsToStorage, getWarehouseStock } from '../utils/mockData';
-import { purchaseApi, companyApi } from '../api';
+import { purchaseApi, companyApi, accountApi } from '../api';
+import { getSupportedAccounts } from '../utils/accountUtils';
 import DateFilterBar from './DateFilterBar';
 import { isItemInDateRange } from '../utils/dateUtils';
 import { useLanguage } from '../context/LanguageContext';
@@ -35,7 +39,11 @@ const INIT_PO_LIST = [
     freight: 500,
     total: 18000,
     status: 'Received',
-    stock_inward_done: true
+    stock_inward_done: true,
+    payment_method: 'Cash',
+    paid_amount: 18000,
+    payment_status: 'Paid',
+    account_name: 'Cash in Hand'
   },
   {
     id: 'PO-2026-002',
@@ -47,7 +55,11 @@ const INIT_PO_LIST = [
     freight: 400,
     total: 18400,
     status: 'Issued',
-    stock_inward_done: false
+    stock_inward_done: false,
+    payment_method: 'Bank Transfer',
+    paid_amount: 18400,
+    payment_status: 'Paid',
+    account_name: 'HBL Bank Account'
   }
 ];
 
@@ -69,6 +81,21 @@ function StatusBadge({ status }) {
   );
 }
 
+const PAYMENT_STATUS_CFG = {
+  Paid:    { cls: 'bg-green-100 text-green-800 border-green-200', label: 'Paid' },
+  Partial: { cls: 'bg-amber-100 text-amber-800 border-amber-200', label: 'Partial' },
+  Unpaid:  { cls: 'bg-rose-100 text-rose-800 border-rose-200', label: 'Credit / Udhaar' },
+};
+
+function PaymentStatusBadge({ status }) {
+  const cfg = PAYMENT_STATUS_CFG[status] || PAYMENT_STATUS_CFG['Paid'];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${cfg.cls}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
 // ── PO Invoice / Detail Modal ─────────────────────────────────────────────────
 function PODetailModal({ po, onClose, onMarkReceived, onIssuePO }) {
   const timeline = ['Draft', 'Issued', 'Received'];
@@ -77,6 +104,9 @@ function PODetailModal({ po, onClose, onMarkReceived, onIssuePO }) {
   const handlePrint = () => {
     window.print();
   };
+
+  const paidAmount = po.paid_amount !== undefined ? po.paid_amount : (po.payment_method === 'Credit / On Account' ? 0 : po.total);
+  const remainingBalance = Math.max(0, po.total - paidAmount);
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -200,6 +230,32 @@ function PODetailModal({ po, onClose, onMarkReceived, onIssuePO }) {
             </div>
           </div>
 
+          {/* Payment Breakdown Box */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-black text-gray-500 uppercase tracking-wider">Payment Breakdown</p>
+              <PaymentStatusBadge status={po.payment_status || (paidAmount >= po.total ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Unpaid'))} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div>
+                <span className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Method</span>
+                <span className="font-extrabold text-gray-800 block">{po.payment_method || 'Cash'}</span>
+              </div>
+              <div>
+                <span className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Paid Amount</span>
+                <span className="font-mono font-bold text-green-700 block">Rs. {paidAmount.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Remaining Balance</span>
+                <span className="font-mono font-bold text-rose-600 block">Rs. {remainingBalance.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Account / Ref</span>
+                <span className="font-medium text-gray-700 block truncate">{po.account_name || 'Cash in Hand'} {po.payment_details?.ref_no ? `(${po.payment_details.ref_no})` : ''}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Invoice Summary Box */}
           <div className="bg-green-50/70 border border-green-200 rounded-xl p-4 space-y-2">
             <div className="flex justify-between items-center">
@@ -314,6 +370,104 @@ function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast, companie
   const [transTo,      setTransTo]      = useState('');
   const [transCharges, setTransCharges] = useState('');
 
+  // Payment state
+  const [accounts,      setAccounts]      = useState([]);
+  const [accountName,   setAccountName]   = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [paidInput,     setPaidInput]     = useState('');
+  const [payRef,        setPayRef]        = useState('');
+
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      try {
+        const res = await accountApi.getAll();
+        if (res && Array.isArray(res) && res.length > 0) {
+          setAccounts(res);
+        }
+      } catch (_) {}
+    };
+    fetchAccounts();
+  }, []);
+
+  const allAvailableAccounts = useMemo(() => {
+    const supported = getSupportedAccounts();
+    const list = [];
+    const nameSet = new Set();
+
+    supported.forEach(acc => {
+      let icon = '🏦';
+      let method = 'Bank Transfer';
+      const lower = (acc.name || '').toLowerCase();
+      if (acc.icon === 'Wallet' || lower.includes('cash')) {
+        icon = '💵';
+        method = 'Cash';
+      } else if (acc.icon === 'Smartphone' || lower.includes('jazz') || lower.includes('easy') || lower.includes('wallet') || lower.includes('sadapay')) {
+        icon = '📱';
+        method = 'Mobile Wallet';
+      } else if (acc.icon === 'Building2' || lower.includes('bank') || lower.includes('hbl') || lower.includes('meezan') || lower.includes('ubl') || lower.includes('alfalah')) {
+        icon = '🏦';
+        method = 'Bank Transfer';
+      } else if (acc.icon === 'FileText' || lower.includes('cheque')) {
+        icon = '📄';
+        method = 'Cheque';
+      }
+
+      const accName = acc.name || acc.label;
+      if (accName && !nameSet.has(accName)) {
+        nameSet.add(accName);
+        list.push({
+          id: accName,
+          name: accName,
+          label: `${icon} ${accName}`,
+          method: method
+        });
+      }
+    });
+
+    if (accounts && Array.isArray(accounts)) {
+      accounts.forEach(acc => {
+        const name = acc.account_name || acc.name;
+        if (name && !nameSet.has(name)) {
+          nameSet.add(name);
+          let method = 'Bank Transfer';
+          let icon = '🏦';
+          const lower = name.toLowerCase();
+          if (acc.type === 'Cash' || lower.includes('cash')) {
+            method = 'Cash';
+            icon = '💵';
+          } else if (acc.type === 'Mobile Wallet' || lower.includes('jazz') || lower.includes('easy')) {
+            method = 'Mobile Wallet';
+            icon = '📱';
+          }
+          list.push({
+            id: name,
+            name: name,
+            label: `${icon} ${name}`,
+            method: method
+          });
+        }
+      });
+    }
+
+    list.push({
+      id: 'Credit / On Account',
+      name: 'Credit / On Account',
+      label: '🤝 Credit / On Account (Udhaar)',
+      method: 'Credit / On Account'
+    });
+
+    return list;
+  }, [accounts]);
+
+  // Sync initial accountName if empty
+  useEffect(() => {
+    if (!accountName && allAvailableAccounts.length > 0) {
+      const first = allAvailableAccounts[0];
+      setAccountName(first.name);
+      setPaymentMethod(first.method);
+    }
+  }, [allAvailableAccounts, accountName]);
+
   const handleProdChange = (val) => {
     if (val === 'CUSTOM') {
       setIsCustomMode(true);
@@ -380,6 +534,28 @@ function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast, companie
   const freight    = parseFloat(transCharges) || 0;
   const grandTotal = subtotal + freight;
 
+  // Calculate resolved effective paid amount
+  let effectivePaid = 0;
+  if (paymentMethod === 'Credit / On Account') {
+    effectivePaid = 0;
+  } else if (paidInput !== '') {
+    effectivePaid = parseFloat(paidInput) || 0;
+  } else {
+    effectivePaid = grandTotal;
+  }
+  effectivePaid = Math.min(Math.max(0, effectivePaid), grandTotal);
+
+  const remainingBalance = Math.max(0, grandTotal - effectivePaid);
+
+  let paymentStatus = 'Paid';
+  if (effectivePaid >= grandTotal) {
+    paymentStatus = 'Paid';
+  } else if (effectivePaid > 0) {
+    paymentStatus = 'Partial';
+  } else {
+    paymentStatus = 'Unpaid';
+  }
+
   const save = (status) => {
     if (!cart.length) return;
     const poNum = `PO-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
@@ -390,6 +566,11 @@ function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast, companie
       supplier, date: new Date().toISOString().split('T')[0],
       total: grandTotal, status,
       itemsCount: cart.length, items: cart,
+      payment_method: paymentMethod,
+      paid_amount: effectivePaid,
+      payment_status: paymentStatus,
+      account_name: accountName,
+      payment_details: { ref_no: payRef },
       transport: {
         company: transCompany,
         vehicle: transVehicle,
@@ -521,6 +702,118 @@ function NewPurchasePanel({ onSave, onCancel, triggerNotificationToast, companie
             <CityDropdown value={transTo} onChange={setTransTo} placeholder="To City..." options={CITIES} />
           </div>
           <input type="number" min="0" placeholder="Transport Charges (Rs.)" value={transCharges} onChange={e => setTransCharges(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-800 focus:border-green-500 focus:outline-none transition bg-white" />
+        </div>
+      </div>
+
+      {/* Payment Information Section */}
+      <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <CreditCard size={15} className="text-emerald-700" />
+          <span className="text-xs font-extrabold text-emerald-900 uppercase tracking-wider block">Payment Information</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Pay From Account (All User Accounts from Account Details) */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-gray-600 uppercase block">Pay From Account / Method <span className="text-red-500">*</span></label>
+            <select
+              value={accountName}
+              onChange={e => {
+                const selectedAccName = e.target.value;
+                setAccountName(selectedAccName);
+                const matched = allAvailableAccounts.find(a => a.name === selectedAccName);
+                if (matched) {
+                  setPaymentMethod(matched.method);
+                  if (matched.method === 'Credit / On Account') {
+                    setPaidInput('0');
+                  } else if (paidInput === '0') {
+                    setPaidInput('');
+                  }
+                }
+              }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-800 bg-white focus:border-green-500 focus:outline-none transition cursor-pointer"
+            >
+              {allAvailableAccounts.map(acc => (
+                <option key={acc.id} value={acc.name}>
+                  {acc.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Payment Type */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-gray-600 uppercase block">Payment Type <span className="text-red-500">*</span></label>
+            <select
+              value={paymentMethod}
+              onChange={e => {
+                const method = e.target.value;
+                setPaymentMethod(method);
+                if (method === 'Credit / On Account') {
+                  setPaidInput('0');
+                  setAccountName('Credit / On Account');
+                } else if (paidInput === '0') {
+                  setPaidInput('');
+                }
+              }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-800 bg-white focus:border-green-500 focus:outline-none transition cursor-pointer"
+            >
+              <option value="Cash">💵 Cash</option>
+              <option value="Bank Transfer">🏦 Bank Transfer</option>
+              <option value="Mobile Wallet">📱 Mobile Wallet</option>
+              <option value="Cheque">📄 Cheque</option>
+              <option value="Credit / On Account">🤝 Credit / On Account (Udhaar)</option>
+            </select>
+          </div>
+        </div>
+
+        {paymentMethod !== 'Credit / On Account' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* Amount Paid */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-600 uppercase block">Amount Paid (Rs.)</label>
+              <div className="relative">
+                <DollarSign size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="number"
+                  min="0"
+                  max={grandTotal}
+                  placeholder={`Default: Rs. ${grandTotal.toLocaleString()}`}
+                  value={paidInput}
+                  onChange={e => setPaidInput(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 pl-7 pr-3 py-2 text-xs font-semibold text-gray-800 bg-white focus:border-green-500 focus:outline-none transition"
+                />
+              </div>
+            </div>
+
+            {/* Reference / Cheque No */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-600 uppercase block">Trx / Cheque # / Ref (Optional)</label>
+              <input
+                type="text"
+                placeholder="e.g. TRX-98234 or Cheque #00129"
+                value={payRef}
+                onChange={e => setPayRef(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-800 bg-white focus:border-green-500 focus:outline-none transition"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Live Payment Summary Bar */}
+        <div className="bg-white border border-emerald-200 rounded-lg p-3 grid grid-cols-3 gap-2 text-center">
+          <div>
+            <span className="text-[9px] font-bold text-gray-400 uppercase block">Grand Total</span>
+            <span className="font-mono font-extrabold text-gray-800 text-xs">Rs. {grandTotal.toLocaleString()}</span>
+          </div>
+          <div className="border-x border-gray-100">
+            <span className="text-[9px] font-bold text-green-600 uppercase block">Amount Paid</span>
+            <span className="font-mono font-black text-green-700 text-xs">Rs. {effectivePaid.toLocaleString()}</span>
+          </div>
+          <div>
+            <span className="text-[9px] font-bold text-rose-600 uppercase block">Remaining Balance</span>
+            <span className="font-mono font-black text-rose-600 text-xs">Rs. {remainingBalance.toLocaleString()}</span>
+          </div>
         </div>
       </div>
 
@@ -916,13 +1209,14 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
                 <th className="py-3 px-4 text-left">Purchased Products & Qty</th>
                 <th className="py-3 px-4 text-left hidden sm:table-cell">Date</th>
                 <th className="py-3 px-4 text-right">Total (Rs.)</th>
+                <th className="py-3 px-4 text-center">Payment</th>
                 <th className="py-3 px-4 text-center">Status</th>
                 <th className="py-3 px-4 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="py-14 text-center text-gray-400 font-medium">
+                <tr><td colSpan={8} className="py-14 text-center text-gray-400 font-medium">
                   <ShoppingBag size={28} className="mx-auto mb-2 text-gray-300" />No purchase orders found.
                 </td></tr>
               ) : filtered.map((po, idx) => (
@@ -954,6 +1248,12 @@ export default function PurchasesScreen({ triggerNotificationToast, addAuditLog,
                   </td>
                   <td className="py-3.5 px-4 text-gray-500 font-semibold whitespace-nowrap hidden sm:table-cell">{po.date}</td>
                   <td className="py-3.5 px-4 text-right font-black text-gray-900 whitespace-nowrap">Rs. {po.total.toLocaleString()}</td>
+                  <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <PaymentStatusBadge status={po.payment_status || (po.paid_amount >= po.total ? 'Paid' : (po.paid_amount > 0 ? 'Partial' : 'Unpaid'))} />
+                      <span className="text-[9px] font-bold text-gray-500">{po.payment_method || 'Cash'}</span>
+                    </div>
+                  </td>
                   <td className="py-3.5 px-4 text-center whitespace-nowrap"><StatusBadge status={po.status} /></td>
                   <td className="py-3.5 px-4">
                     <div className="flex items-center justify-center gap-1.5">

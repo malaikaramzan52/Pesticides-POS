@@ -17,6 +17,14 @@ const warehouseRoutes = require('./warehouseRoutes');
 const reportRoutes = require('./reportRoutes');
 const settingsRoutes = require('./settingsRoutes');
 
+router.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Pesticides POS API v1 is active',
+    timestamp: new Date().toISOString()
+  });
+});
+
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/products', productRoutes);

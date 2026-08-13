@@ -29,9 +29,6 @@ const connectDB = async () => {
     }).catch((error) => {
       cachedPromise = null;
       console.error(`[MongoDB] ❌ Connection error: ${error.message}`);
-      if (!process.env.VERCEL) {
-        process.exit(1);
-      }
       throw error;
     });
   }
