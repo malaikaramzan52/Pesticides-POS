@@ -4,7 +4,7 @@ import {
   CheckCircle2, Eye, Clock, User, Coins, CreditCard, Building2, 
   Wallet, AlertTriangle, CheckCircle, XCircle, Package, FileText,
   Calendar, Layers, ArrowRight, RefreshCw, ShoppingBag, ChevronLeft,
-  ChevronRight, Scale, ShoppingCart, ArrowLeft
+  ChevronRight, Scale, ShoppingCart, ArrowLeft, PauseCircle, Pause, RotateCcw
 } from 'lucide-react';
 import { PRODUCTS, CUSTOMERS, COMPANIES, UNITS, CATEGORIES, setStoredData } from '../utils/mockData';
 import { productApi, salesApi, customerApi } from '../api';
@@ -59,14 +59,15 @@ export default function POSScreen({
     paymentDetails, setPaymentDetails,
     addProductToCart,
     handleQuantityChange, handleUnitChange, handlePriceChange, handleDiscountChange, removeCartItem,
-    resetPOSWorkspace,
+    resetPOSWorkspace, resumeHeldBill,
     subtotal, gstAmount, totalDiscount, billDiscountAmount, grandTotal, receivedVal, changeReturn,
     offerSavings,
     walkInName, setWalkInName, walkInPhone, setWalkInPhone,
     billDiscountType, setBillDiscountType, billDiscountValue, setBillDiscountValue
   } = usePOSContext();
 
-  const [invoiceId, setInvoiceId] = useState(`INV-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+  const generateUniqueInvoiceId = () => `INV-2026-${Math.floor(1000 + Math.random() * 9000)}-${Date.now().toString().slice(-4)}`;
+  const [invoiceId, setInvoiceId] = useState(generateUniqueInvoiceId);
   const [salesperson] = useState(currentUser.name || 'Admin');
   
   const [searchProductQuery, setSearchProductQuery] = useState('');
@@ -102,50 +103,46 @@ export default function POSScreen({
   }, []);
 
   // Parallel background hydration for products & customers
+  const fetchPOSProducts = async () => {
+    try {
+      const [data, custs] = await Promise.all([
+        productApi.getAll().catch(() => null),
+        customerApi.getAll().catch(() => null)
+      ]);
+
+      if (data && Array.isArray(data) && data.length > 0) {
+        const merged = [...data];
+        PRODUCTS.forEach(p => {
+          if (!merged.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
+            merged.push(p);
+          }
+        });
+        data.forEach(p => {
+          const idx = PRODUCTS.findIndex(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code);
+          if (idx !== -1) {
+            PRODUCTS[idx] = { ...PRODUCTS[idx], ...p };
+          } else {
+            PRODUCTS.unshift(p);
+          }
+        });
+        setPosProductsList(merged);
+        try {
+          localStorage.setItem('agro_pos_products_cache', JSON.stringify(merged));
+        } catch (e) {}
+      }
+
+      if (custs && Array.isArray(custs) && custs.length > 0) {
+        custs.forEach(c => {
+          if (!CUSTOMERS.some(ic => (ic._id || ic.id) === (c._id || c.id) || ic.code === c.code)) {
+            CUSTOMERS.push(c);
+          }
+        });
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
-    let isMounted = true;
-    const syncPOSData = async () => {
-      try {
-        const [data, custs] = await Promise.all([
-          productApi.getAll().catch(() => null),
-          customerApi.getAll().catch(() => null)
-        ]);
-
-        if (!isMounted) return;
-
-        if (data && Array.isArray(data) && data.length > 0) {
-          const merged = [...data];
-          PRODUCTS.forEach(p => {
-            if (!merged.some(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code)) {
-              merged.push(p);
-            }
-          });
-          data.forEach(p => {
-            const idx = PRODUCTS.findIndex(mp => (mp._id || mp.id) === (p._id || p.id) || mp.code === p.code);
-            if (idx !== -1) {
-              PRODUCTS[idx] = { ...PRODUCTS[idx], ...p };
-            } else {
-              PRODUCTS.unshift(p);
-            }
-          });
-          setPosProductsList(merged);
-          try {
-            localStorage.setItem('agro_pos_products_cache', JSON.stringify(merged));
-          } catch (e) {}
-        }
-
-        if (custs && Array.isArray(custs) && custs.length > 0) {
-          custs.forEach(c => {
-            if (!CUSTOMERS.some(ic => (ic._id || ic.id) === (c._id || c.id) || ic.code === c.code)) {
-              CUSTOMERS.push(c);
-            }
-          });
-        }
-      } catch (e) {}
-    };
-
-    syncPOSData();
-    return () => { isMounted = false; };
+    fetchPOSProducts();
   }, []);
 
   useEffect(() => {
@@ -358,7 +355,7 @@ export default function POSScreen({
       await fetchPOSProducts();
 
       resetPOSWorkspace();
-      setInvoiceId(`INV-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+      setInvoiceId(generateUniqueInvoiceId());
       setIsBillingDrawerOpen(false);
       setIsPaymentPage(false);
       if (barcodeRef.current) barcodeRef.current.focus();
@@ -368,21 +365,77 @@ export default function POSScreen({
   };
 
   const handleHoldSale = () => {
-    if (cart.length === 0) return;
-    setHeldSales([{
-      id: `HOLD_${Date.now()}`, hold_no: `HOLD-00${heldSales.length + 1}`,
-      customer_id: selectedCustomer.id, customer_name: selectedCustomer.name,
+    if (cart.length === 0) {
+      if (triggerNotificationToast) {
+        triggerNotificationToast('Empty Cart', 'Cart is empty. Add products before holding a bill.', 'error');
+      }
+      return;
+    }
+
+    const isWalkIn = !selectedCustomer || selectedCustomer.id === 'CUST001' || selectedCustomer._id === 'CUST001' || selectedCustomer.name === 'Walk-in Customer';
+    const activeCustName = (isWalkIn && walkInName.trim()) ? walkInName.trim() : (selectedCustomer?.name || 'Walk-in Customer');
+
+    const newHeldBill = {
+      id: `HOLD_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      hold_no: `HOLD-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      notes: `Items: ${cart.length}`,
-      items: cart.map(i => ({ product_id: i.product.id, quantity: i.quantity, price: i.price, batch_id: i.batch.id, discount: i.discount, tax_rate: i.taxRate }))
-    }, ...heldSales]);
-    
+      timestamp: Date.now(),
+      customer: selectedCustomer,
+      customer_id: selectedCustomer?._id || selectedCustomer?.id || 'CUST001',
+      customer_name: activeCustName,
+      walkInName: walkInName || '',
+      walkInPhone: walkInPhone || '',
+      billDiscountType: billDiscountType || 'Amount',
+      billDiscountValue: billDiscountValue || '',
+      subtotal: parseFloat(subtotal.toFixed(2)),
+      gstAmount: parseFloat(gstAmount.toFixed(2)),
+      totalDiscount: parseFloat(totalDiscount.toFixed(2)),
+      billDiscountAmount: parseFloat(billDiscountAmount.toFixed(2)),
+      grandTotal: grandTotal,
+      itemCount: cart.reduce((sum, i) => sum + i.quantity, 0),
+      items: JSON.parse(JSON.stringify(cart)),
+      cart: JSON.parse(JSON.stringify(cart))
+    };
+
+    setHeldSales([newHeldBill, ...(heldSales || [])]);
     resetPOSWorkspace();
-    setInvoiceId(`INV-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+    setInvoiceId(generateUniqueInvoiceId());
     setIsBillingDrawerOpen(false);
     setIsPaymentPage(false);
+
+    if (triggerNotificationToast) {
+      triggerNotificationToast('Bill Held', 'Bill held successfully.', 'success');
+    }
+    if (addAuditLog) {
+      addAuditLog('Bill Held', `Bill ${newHeldBill.hold_no} held for ${activeCustName} (Rs. ${grandTotal})`);
+    }
     if (barcodeRef.current) barcodeRef.current.focus();
+  };
+
+  const handleRecallHeldBill = (heldBill) => {
+    if (!heldBill) return;
+
+    if (cart.length > 0) {
+      const confirmReplace = window.confirm('Your current cart has items. Resuming this held bill will overwrite your current cart. Do you want to proceed?');
+      if (!confirmReplace) return;
+    }
+
+    if (resumeHeldBill) {
+      resumeHeldBill(heldBill);
+    }
+
+    setHeldSales(prev => (prev || []).filter(h => h.id !== heldBill.id));
+    setActiveModal(null);
+    setIsBillingDrawerOpen(true);
+    setIsPaymentPage(false);
+
+    if (triggerNotificationToast) {
+      triggerNotificationToast('Bill Resumed', `Held bill ${heldBill.hold_no || heldBill.id} loaded back to cart.`, 'success');
+    }
+    if (addAuditLog) {
+      addAuditLog('Bill Resumed', `Resumed held bill ${heldBill.hold_no || heldBill.id}`);
+    }
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -435,7 +488,39 @@ export default function POSScreen({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* ⏸️ Hold Current Bill Button */}
+          <button
+            type="button"
+            onClick={handleHoldSale}
+            disabled={cart.length === 0}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-extrabold transition shadow-xs border cursor-pointer ${
+              cart.length === 0
+                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                : 'bg-amber-500 hover:bg-amber-600 active:scale-95 text-white border-amber-600'
+            }`}
+            title="Hold Current Bill"
+          >
+            <PauseCircle size={16} />
+            <span>Hold</span>
+          </button>
+
+          {/* 📋 Held Bills Modal Counter Button */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('hold_recall')}
+            className="relative flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3.5 py-2 rounded-lg text-xs font-bold transition border border-gray-300 cursor-pointer"
+            title="View Held Bills"
+          >
+            <Clock size={16} className="text-amber-600" />
+            <span>Held Bills</span>
+            {(heldSales || []).length > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-xs">
+                {(heldSales || []).length}
+              </span>
+            )}
+          </button>
+
           {/* 🛒 Cart Icon Button with Badge */}
           <button
             type="button"
@@ -1129,38 +1214,55 @@ export default function POSScreen({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                let isOutOfStock = false;
-                for (const item of cart) {
-                  const productTotalReq = cart.filter(c => c.product.id === item.product.id).reduce((s, c) => s + (c.quantity * c.unitFactor), 0);
-                  const totalProductStock = item.product.batches?.reduce((s, b) => s + (b.stock_qty || 0), 0) || 0;
-                  if (productTotalReq > totalProductStock) {
-                    triggerNotificationToast(
-                      'Out of Stock',
-                      `Cannot proceed. ${item.product.name} requires ${productTotalReq} units but only ${totalProductStock} are available.`,
-                      'error'
-                    );
-                    isOutOfStock = true;
-                    break;
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleHoldSale}
+                disabled={cart.length === 0}
+                className={`py-3 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider transition shadow-sm flex items-center justify-center gap-1.5 border cursor-pointer ${
+                  cart.length === 0
+                    ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                    : 'bg-amber-500 hover:bg-amber-600 active:scale-95 text-white border-amber-600'
+                }`}
+                title="Hold Current Bill"
+              >
+                <PauseCircle size={16} />
+                <span>Hold</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  let isOutOfStock = false;
+                  for (const item of cart) {
+                    const productTotalReq = cart.filter(c => c.product.id === item.product.id).reduce((s, c) => s + (c.quantity * c.unitFactor), 0);
+                    const totalProductStock = item.product.batches?.reduce((s, b) => s + (b.stock_qty || 0), 0) || 0;
+                    if (productTotalReq > totalProductStock) {
+                      triggerNotificationToast(
+                        'Out of Stock',
+                        `Cannot proceed. ${item.product.name} requires ${productTotalReq} units but only ${totalProductStock} are available.`,
+                        'error'
+                      );
+                      isOutOfStock = true;
+                      break;
+                    }
                   }
-                }
-                if (isOutOfStock) return;
-                
-                setIsBillingDrawerOpen(false);
-                setIsPaymentPage(true);
-              }}
-              disabled={cart.length === 0}
-              className={`w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider transition shadow-md flex items-center justify-center gap-2 ${
-                cart.length === 0
-                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 text-white cursor-pointer active:scale-[0.99]'
-              }`}
-            >
-              <CreditCard size={16} />
-              <span>Proceed to Payment</span>
-            </button>
+                  if (isOutOfStock) return;
+                  
+                  setIsBillingDrawerOpen(false);
+                  setIsPaymentPage(true);
+                }}
+                disabled={cart.length === 0}
+                className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-wider transition shadow-md flex items-center justify-center gap-2 ${
+                  cart.length === 0
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 text-white cursor-pointer active:scale-[0.99]'
+                }`}
+              >
+                <CreditCard size={16} />
+                <span>Proceed to Payment</span>
+              </button>
+            </div>
 
             <button
               type="button"
@@ -1180,7 +1282,8 @@ export default function POSScreen({
         selectedCustomer={selectedCustomer}
         setSelectedCustomer={setSelectedCustomer}
         heldSales={heldSales}
-        recallHeldInvoice={() => { setActiveModal(null); }}
+        setHeldSales={setHeldSales}
+        recallHeldInvoice={handleRecallHeldBill}
         invoices={invoices}
         setInvoices={setInvoices}
         addAuditLog={addAuditLog}

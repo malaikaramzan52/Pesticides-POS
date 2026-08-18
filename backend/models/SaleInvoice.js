@@ -4,7 +4,7 @@ const saleInvoiceItemSchema = new mongoose.Schema({
   product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
   product_name: { type: String, required: true },
   batch_no: { type: String, default: 'N/A' },
-  quantity: { type: Number, required: true, min: 1 },
+  quantity: { type: Number, required: true, min: 0.0001 },
   returned_qty: { type: Number, default: 0 },   // tracks cumulative returned qty per item
   unit: { type: String, required: true },
   price: { type: Number, required: true },

@@ -112,7 +112,22 @@ export default function App() {
     } catch (e) {}
     return [];
   });
-  const [heldSales, setHeldSales] = useState(MOCK_HELD_SALES);
+  const [heldSales, setHeldSales] = useState(() => {
+    try {
+      const cached = localStorage.getItem('agro_pos_held_sales_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return MOCK_HELD_SALES || [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('agro_pos_held_sales_cache', JSON.stringify(heldSales));
+    } catch (e) {}
+  }, [heldSales]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [expenses, setExpenses] = useState(() => {
     try {

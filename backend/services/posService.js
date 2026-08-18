@@ -75,7 +75,16 @@ const processPOSSale = async (saleData, currentUser = null) => {
     });
   }
 
-  const invNo = invoice_no || `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+  let invNo = invoice_no;
+  if (!invNo || (await SaleInvoice.exists({ invoice_no: invNo }))) {
+    let attempts = 0;
+    do {
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      const timeSuffix = Date.now().toString().slice(-4);
+      invNo = `INV-2026-${rand}-${timeSuffix}`;
+      attempts++;
+    } while ((await SaleInvoice.exists({ invoice_no: invNo })) && attempts < 20);
+  }
 
   // Deduct stock from product batches (FEFO/FIFO / Cascade)
   for (const item of items || []) {
@@ -93,7 +102,13 @@ const processPOSSale = async (saleData, currentUser = null) => {
       let remainingToDeduct = item.quantity;
       
       // 1. Primary batch deduction
-      const primaryBatch = product.batches.find(b => b.batch_no === item.batch_no || b._id.toString() === item.batch_id);
+      const primaryBatch = product.batches.find(b => {
+        if (!b) return false;
+        if (item.batch_no && b.batch_no && b.batch_no === item.batch_no) return true;
+        const bId = (b._id || b.id)?.toString();
+        const itemId = (item.batch_id || item.batch_no)?.toString();
+        return Boolean(bId && itemId && bId === itemId);
+      });
       if (primaryBatch) {
         if (primaryBatch.stock_qty >= remainingToDeduct) {
           primaryBatch.stock_qty -= remainingToDeduct;
@@ -161,7 +176,7 @@ const processPOSSale = async (saleData, currentUser = null) => {
       product_name: prodName,
       batch_no: item.batch_no || item.batch?.batch_no || 'BATCH-001',
       quantity: Number(item.quantity) || 1,
-      unit: item.unit || item.unit_name || item.unitOption?.name || 'Unit',
+      unit: item.unit || item.unitLabel || item.unit_name || item.unitOption?.name || 'Unit',
       price: Number(item.price || item.retail_price || 0),
       line_total: Number(item.line_total || item.total || (item.price || 0) * (item.quantity || 1)),
       discount: Number(item.discount || 0),
@@ -194,6 +209,10 @@ const processPOSSale = async (saleData, currentUser = null) => {
   customer.last_purchase_date = new Date().toISOString().split('T')[0];
   await customer.save();
 
+  const validUserId = (currentUser && currentUser._id && mongoose.Types.ObjectId.isValid(currentUser._id))
+    ? currentUser._id
+    : ((saleData.user_id && mongoose.Types.ObjectId.isValid(saleData.user_id)) ? saleData.user_id : null);
+
   // Create Sale Invoice Document
   const invoice = await SaleInvoice.create({
     invoice_no: invNo,
@@ -202,8 +221,8 @@ const processPOSSale = async (saleData, currentUser = null) => {
     customer_id: customer._id,
     customer_name: customer.name,
     customer_type: customer.customer_type,
-    user_id: currentUser ? currentUser._id : null,
-    cashier_name: currentUser ? currentUser.name : 'Admin',
+    user_id: validUserId,
+    cashier_name: currentUser ? (currentUser.name || 'Admin') : (saleData.cashier_name || 'Admin'),
     subtotal: calculatedSubtotal,
     discount_amount: Number(discount_amount || 0),
     bill_discount: Number(bill_discount || 0),
@@ -221,8 +240,8 @@ const processPOSSale = async (saleData, currentUser = null) => {
 
   await auditService.logAction(
     'Invoice Completed',
-    `Invoice ${invNo} — ${customer.name} — Rs. ${grand_total}`,
-    currentUser ? currentUser.name : 'Admin'
+    `Invoice ${invNo} — ${customer.name} — Rs. ${calculatedGrandTotal}`,
+    currentUser ? (currentUser.name || 'Admin') : 'Admin'
   );
 
   return invoice;

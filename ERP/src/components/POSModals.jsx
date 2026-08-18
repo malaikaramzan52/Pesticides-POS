@@ -16,7 +16,10 @@ import {
   AlertTriangle,
   Lock,
   Download,
-  CreditCard
+  CreditCard,
+  Clock,
+  Trash2,
+  PauseCircle
 } from 'lucide-react';
 import { CUSTOMERS, PRODUCTS, UNITS } from '../utils/mockData';
 import { useLanguage } from '../context/LanguageContext';
@@ -29,6 +32,7 @@ export default function POSModals({
   selectedProductForBatch,
   addBatchToCart,
   heldSales,
+  setHeldSales,
   recallHeldInvoice,
   invoices,
   setInvoices,
@@ -57,9 +61,11 @@ export default function POSModals({
     case 'hold_recall':
       return (
         <HoldRecallModal 
-          heldSales={heldSales} 
+          heldSales={heldSales || []} 
+          setHeldSales={setHeldSales}
           onClose={() => setActiveModal(null)} 
           onRecall={recallHeldInvoice}
+          triggerNotificationToast={triggerNotificationToast}
         />
       );
     case 'print_preview':
@@ -536,72 +542,180 @@ function BatchSelectModal({ product, onClose, addBatchToCart }) {
 // ----------------------------------------------------
 // 4. HOLD & RECALL SALES MODAL
 // ----------------------------------------------------
-function HoldRecallModal({ heldSales, onClose, onRecall }) {
+function HoldRecallModal({ heldSales, setHeldSales, onClose, onRecall, triggerNotificationToast }) {
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+
+  const handleDelete = (held) => {
+    if (setHeldSales) {
+      setHeldSales(prev => (prev || []).filter(h => h.id !== held.id));
+    }
+    setDeleteConfirmId(null);
+    if (triggerNotificationToast) {
+      triggerNotificationToast('Bill Deleted', `Held bill ${held.hold_no || held.id} removed.`, 'info');
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-      <div className="bg-white rounded-2xl border border-gray-200 w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto select-none">
+      <div className="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
         
         {/* Header */}
-        <div className="bg-green-600 px-6 py-4 flex items-center justify-between text-white">
-          <div className="flex items-center space-x-2">
-            <Layers size={18} />
-            <h3 className="font-bold text-sm">Held Incomplete Invoices</h3>
+        <div className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-4 flex items-center justify-between text-white shrink-0">
+          <div className="flex items-center space-x-3">
+            <div className="bg-white/20 p-2 rounded-xl backdrop-blur-xs">
+              <Clock size={20} />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm tracking-wide">Held Bills Counter</h3>
+              <p className="text-[10px] text-green-100 font-medium">
+                {heldSales.length} bill{heldSales.length !== 1 ? 's' : ''} currently on hold
+              </p>
+            </div>
           </div>
-          <button onClick={onClose} className="hover:bg-green-700 p-1 rounded-full transition">
+          <button onClick={onClose} className="hover:bg-white/20 p-1.5 rounded-full transition cursor-pointer">
             <X size={18} />
           </button>
         </div>
 
-        <div className="p-6">
-          <div className="border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                  <th className="py-2.5 px-4">Hold No</th>
-                  <th className="py-2.5 px-4">Date / Time</th>
-                  <th className="py-2.5 px-4">Customer Name</th>
-                  <th className="py-2.5 px-4">Cart Summary</th>
-                  <th className="py-2.5 px-4 text-center"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {heldSales.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="py-12 text-center text-gray-400 font-medium bg-gray-50/50">
-                      No invoices currently on hold counter.
-                    </td>
-                  </tr>
-                ) : (
-                  heldSales.map((held) => (
-                    <tr key={held.id} className="hover:bg-green-50/20 transition">
-                      <td className="py-3 px-4 font-mono font-bold text-green-700">{held.hold_no}</td>
-                      <td className="py-3 px-4 text-gray-500 font-semibold">{held.date} {held.time}</td>
-                      <td className="py-3 px-4 font-bold text-gray-800">{held.customer_name}</td>
-                      <td className="py-3 px-4 font-medium text-gray-600">{held.notes}</td>
-                      <td className="py-3 px-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onRecall(held)}
-                          className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[10px] font-bold transition shadow-sm"
-                        >
-                          Recall Sale
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+        {/* Content Body */}
+        <div className="p-6 overflow-y-auto flex-1 space-y-3">
+          {heldSales.length === 0 ? (
+            <div className="py-16 text-center space-y-3 bg-gray-50/60 rounded-2xl border-2 border-dashed border-gray-200">
+              <Clock size={42} className="mx-auto text-gray-300" />
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wide">No Held Bills Found</h4>
+                <p className="text-xs text-gray-400">Bills paused by cashiers will appear here for quick resuming.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {heldSales.map((held) => {
+                const itemList = Array.isArray(held.items) ? held.items : (Array.isArray(held.cart) ? held.cart : []);
+                const itemsCount = held.itemCount || itemList.reduce((sum, i) => sum + (i.quantity || 1), 0) || itemList.length;
+                const grandTotal = held.grandTotal || held.totalAmount || itemList.reduce((s, i) => s + (i.total || 0), 0);
+                const custName = held.customer_name || (held.customer && held.customer.name) || held.walkInName || 'Walk-in Customer';
+                const custType = (held.customer && held.customer.customer_type) || 'Retail';
+                const isDeleting = deleteConfirmId === held.id;
+
+                return (
+                  <div
+                    key={held.id}
+                    className="bg-white border border-gray-200 rounded-xl p-4 hover:border-green-300 transition shadow-2xs space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono font-extrabold text-green-700 bg-green-50 px-2.5 py-1 rounded-lg border border-green-200 text-xs">
+                          {held.hold_no || held.id}
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-extrabold text-xs text-gray-900">{custName}</h4>
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 uppercase">
+                              {custType}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-400 font-medium mt-0.5">
+                            <span className="flex items-center gap-1"><Calendar size={11} /> {held.date} {held.time}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-right">
+                        <div>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase block">Items</span>
+                          <span className="text-xs font-extrabold text-gray-800">{itemsCount} item{itemsCount !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div className="border-l border-gray-200 pl-4">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase block">Total Amount</span>
+                          <span className="text-sm font-black text-green-700 font-mono">Rs. {grandTotal.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Items List Preview Pills */}
+                    {itemList.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 bg-gray-50 p-2 rounded-lg border border-gray-100 text-[11px] text-gray-600">
+                        {itemList.slice(0, 4).map((it, idx) => (
+                          <span key={idx} className="bg-white px-2 py-0.5 rounded border border-gray-200 font-semibold text-[10px] text-gray-700">
+                            {it.product?.name || it.product_name || 'Product'} ({it.quantity} {it.unitLabel || it.unit || ''})
+                          </span>
+                        ))}
+                        {itemList.length > 4 && (
+                          <span className="text-[10px] font-bold text-gray-400 self-center pl-1">
+                            +{itemList.length - 4} more
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action Bar / Delete Confirmation */}
+                    <div className="flex items-center justify-between pt-1">
+                      {isDeleting ? (
+                        <div className="w-full bg-red-50 border border-red-200 rounded-lg p-2.5 flex items-center justify-between animate-in fade-in duration-150">
+                          <div className="flex items-center gap-2 text-xs font-bold text-red-700">
+                            <AlertTriangle size={15} />
+                            <span>Permanently delete held bill {held.hold_no || held.id}?</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmId(null)}
+                              className="px-3 py-1 bg-white border border-gray-300 hover:bg-gray-100 rounded text-xs font-bold text-gray-700 cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(held)}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-extrabold cursor-pointer"
+                            >
+                              Confirm Delete
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmId(held.id)}
+                            className="px-3 py-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Trash2 size={14} />
+                            <span>Remove</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onRecall(held);
+                              onClose();
+                            }}
+                            className="px-4 py-1.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white rounded-lg text-xs font-extrabold transition shadow-sm flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RotateCcw size={14} />
+                            <span>Resume Bill</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-50 px-6 py-4 flex justify-end border-t border-gray-100">
+        <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-100 shrink-0">
+          <span className="text-xs text-gray-500 font-medium">
+            Resuming a bill restores all cart products, discounts, and customer details.
+          </span>
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 bg-white hover:bg-gray-50 transition"
+            className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 bg-white hover:bg-gray-100 transition cursor-pointer"
           >
-            Cancel
+            Close
           </button>
         </div>
 

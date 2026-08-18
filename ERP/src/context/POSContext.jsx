@@ -304,6 +304,22 @@ export function POSProvider({ children, triggerNotificationToast }) {
   const receivedVal   = parseFloat(receivedAmount) || 0;
   const changeReturn  = Math.max(0, receivedVal - grandTotal);
 
+  const resumeHeldBill = (heldBill) => {
+    if (!heldBill) return;
+    const restoredItems = Array.isArray(heldBill.cart) ? heldBill.cart : (Array.isArray(heldBill.items) ? heldBill.items : []);
+    setCart(restoredItems);
+    if (heldBill.customer) {
+      setSelectedCustomer(heldBill.customer);
+    }
+    setWalkInName(heldBill.walkInName || '');
+    setWalkInPhone(heldBill.walkInPhone || '');
+    setBillDiscountType(heldBill.billDiscountType || 'Amount');
+    setBillDiscountValue(heldBill.billDiscountValue !== undefined && heldBill.billDiscountValue !== null ? heldBill.billDiscountValue : '');
+    setPaymentMethod('Cash');
+    setReceivedAmount('');
+    setPaymentDetails({});
+  };
+
   return (
     <POSContext.Provider value={{
       cart, setCart,
@@ -318,6 +334,7 @@ export function POSProvider({ children, triggerNotificationToast }) {
       addProductToCart,
       handleQuantityChange, handleUnitChange, handlePriceChange, handleDiscountChange, removeCartItem,
       resetPOSWorkspace,
+      resumeHeldBill,
       subtotal, gstAmount, totalDiscount, billDiscountAmount, grandTotal, receivedVal, changeReturn,
       offerSavings,
       walkInName, setWalkInName, walkInPhone, setWalkInPhone,
