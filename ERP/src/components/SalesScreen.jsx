@@ -55,14 +55,14 @@ function printInvoice(inv) {
   document.body.appendChild(iframe);
 
   const shopInfo = getStoredData('AGRO_ERP_SHOP_INFO', {
-    name: 'Punjab Pesticides & Agro Wholesale Depot',
-    owner: 'Harpreet Singh & Sons',
-    licenseNo: 'FERT-PB-2024-9981 / PEST-8812',
-    gstin: '03AAAAA0000A1Z5',
-    phone: '9876543210',
-    email: 'info@punjabpesticides.com',
-    address: 'Shop No. 45, Grain Market Road, Sector 3, Bathinda, Punjab 151001',
-    website: 'www.punjabpesticides.com'
+    name: 'Pak Agro Pesticides & Seeds Wholesale Depot',
+    owner: 'Tariq Mahmood & Sons',
+    licenseNo: 'FERT-PK-2024-9981 / PEST-8812',
+    gstin: 'NTN-9876543-1',
+    phone: '+92 300 1234567',
+    email: 'info@pakagroerp.pk',
+    address: 'Shop No. 45, Grain Market Road, Multan, Punjab, Pakistan',
+    website: 'www.pakagroerp.pk'
   });
 
   const doc = iframe.contentWindow.document;

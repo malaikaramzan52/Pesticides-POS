@@ -26,21 +26,21 @@ export default function SettingsScreen({ triggerNotificationToast }) {
 
   // Shop Information State
   const [shopInfo, setShopInfo] = useState(() => getStoredData('AGRO_ERP_SHOP_INFO', {
-    name: 'Punjab Pesticides & Agro Wholesale Depot',
-    owner: 'Harpreet Singh & Sons',
-    licenseNo: 'FERT-PB-2024-9981 / PEST-8812',
-    gstin: '03AAAAA0000A1Z5',
-    phone: '9876543210',
-    email: 'info@punjabpesticides.com',
-    address: 'Shop No. 45, Grain Market Road, Sector 3, Bathinda, Punjab 151001',
-    website: 'www.punjabpesticides.com'
+    name: 'Pak Agro Pesticides & Seeds Wholesale Depot',
+    owner: 'Tariq Mahmood & Sons',
+    licenseNo: 'FERT-PK-2024-9981 / PEST-8812',
+    gstin: 'NTN-9876543-1',
+    phone: '+92 300 1234567',
+    email: 'info@pakagroerp.pk',
+    address: 'Shop No. 45, Grain Market Road, Multan, Punjab, Pakistan',
+    website: 'www.pakagroerp.pk'
   }));
 
   // Receipt Settings State
   const [receiptSettings, setReceiptSettings] = useState({
     printerType: 'USB Thermal Receipt Printer (80mm)',
     printCopyCount: 1,
-    headerText: 'PUNJAB PESTICIDES & AGRO WHOLESALE DEPOT',
+    headerText: 'PAK AGRO PESTICIDES & SEEDS WHOLESALE DEPOT',
     footerText: 'Thank you for buying genuine pesticides. Chemicals once sold are subject to store return policies.',
     autoPrintOnSave: true,
     enableSound: true,

@@ -90,7 +90,7 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(USERS[0]); // Default to Anil Sharma (Admin)
-  const [branch, setBranch] = useState('Bathinda H.O.');
+  const [branch, setBranch] = useState('Multan H.O.');
   const [counter, setCounter] = useState('Counter A');
   const [unreadNotifications, setUnreadNotifications] = useState(3);
   const [accountDetailsTarget, setAccountDetailsTarget] = useState('Cash');

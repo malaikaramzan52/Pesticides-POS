@@ -750,17 +750,24 @@ function PrintPreviewModal({ invoice, onClose, triggerNotificationToast }) {
               visibility: hidden;
             }
             #printable-receipt, #printable-receipt * {
-              visibility: visible;
+              visibility: visible !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
             }
             #printable-receipt {
-              position: absolute;
-              left: 0;
-              top: 0;
-              margin: 0;
-              padding: 0;
-              width: 100%;
+              position: fixed !important;
+              left: 0 !important;
+              top: 0 !important;
+              margin: 0 !important;
+              padding: 16px !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              border: none !important;
+              box-shadow: none !important;
+              background: #fff !important;
+              z-index: 999999 !important;
+              page-break-after: avoid !important;
+              page-break-inside: avoid !important;
             }
             @page { margin: 0; }
           }
@@ -803,9 +810,9 @@ function PrintPreviewModal({ invoice, onClose, triggerNotificationToast }) {
             /* Thermal Layout */
             <div id="printable-receipt" className="bg-white w-[300px] border border-gray-300 p-4 shadow-sm text-[10px] font-mono text-gray-800 space-y-3">
               <div className="text-center">
-                <h4 className="font-bold text-sm tracking-wide">AGRO-CHEMICALS H.O.</h4>
-                <p>Bathinda Market Road, Punjab</p>
-                <p>Phone: 98765-43210</p>
+                <h4 className="font-bold text-sm tracking-wide">PAK AGRO-CHEMICALS H.O.</h4>
+                <p>Grain Market Road, Multan, Punjab, Pakistan</p>
+                <p>Phone: +92 300 1234567</p>
                 <div className="border-t border-dashed border-gray-400 my-2"></div>
                 <p className="text-[9px]">INVOICE: {invoice.invoice_no}</p>
                 <p className="text-[9px]">DATE: {invoice.date} {invoice.time}</p>
@@ -906,11 +913,11 @@ function PrintPreviewModal({ invoice, onClose, triggerNotificationToast }) {
                 <div>
                   <h2 className="text-xl font-bold text-green-700 tracking-wider">AGRO CHEMICALS WHOLESALE ERP</h2>
                   <p className="text-gray-500 font-medium">Distributor & Seed Wholesaler</p>
-                  <p className="text-[10px] mt-1">Shop 14, Grains Market Road, Bathinda, Punjab</p>
-                  <p className="text-[10px]">Email: billing@agroerp.com | Phone: +91 98765-43210</p>
+                  <p className="text-[10px] mt-1">Shop 14, Grain Market Road, Multan, Punjab, Pakistan</p>
+                  <p className="text-[10px]">Email: info@pakagroerp.pk | Phone: +92 300 1234567</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-lg font-bold text-gray-800 uppercase block tracking-wider">Tax Invoice</span>
+                  <span className="text-lg font-bold text-gray-800 uppercase block tracking-wider">INVOICE</span>
                   <span className="font-mono text-green-600 font-bold block mt-1">{invoice.invoice_no}</span>
                   <p className="text-[10px] text-gray-500 mt-0.5">Date: {invoice.date} | Time: {invoice.time}</p>
                 </div>
@@ -922,12 +929,12 @@ function PrintPreviewModal({ invoice, onClose, triggerNotificationToast }) {
                   <span className="text-gray-400 block font-bold uppercase text-[9px] tracking-wide mb-1">Customer / Billed To</span>
                   <h4 className="font-bold text-gray-900 text-xs">{invoice.customer_name}</h4>
                   <span className="text-[10px] text-green-600 font-semibold mt-0.5 block">{invoice.customer_type} Account</span>
-                  <p className="text-[10px] text-gray-500 mt-2">Mobile: +91 {customer.phone || 'N/A'}</p>
+                  <p className="text-[10px] text-gray-500 mt-2">Mobile: {customer.phone ? (customer.phone.startsWith('+') ? customer.phone : `+92 ${customer.phone}`) : 'N/A'}</p>
                   <p className="text-[10px] text-gray-500 leading-normal mt-0.5">{customer.address || 'N/A'}</p>
                 </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
                   <span className="text-gray-400 block font-bold uppercase text-[9px] tracking-wide mb-1">Counter Session Details</span>
-                  <p className="font-medium text-gray-800">Branch Depot: Bathinda Main H.O.</p>
+                  <p className="font-medium text-gray-800">Branch Depot: Multan Main H.O.</p>
                   <p className="font-medium text-gray-800 mt-1">Active Cashier: {invoice.cashier_name}</p>
                   <p className="font-medium text-gray-800 mt-1">Settlement Method: {invoice.payment_method}</p>
                   <p className="font-medium text-gray-800 mt-1">Status: <span className="font-bold text-green-600 uppercase">{invoice.payment_status}</span></p>

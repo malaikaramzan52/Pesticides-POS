@@ -3,12 +3,12 @@ import { getStoredData } from '../utils/mockData';
 
 export default function PrintHeader({ title, dateRange = '', subtitle = '' }) {
   const defaultShopInfo = {
-    name: 'Punjab Pesticides & Agro Wholesale Depot',
-    owner: 'Harpreet Singh & Sons',
-    phone: '9876543210',
-    email: 'info@punjabpesticides.com',
-    address: 'Shop No. 45, Grain Market Road, Sector 3, Bathinda, Punjab 151001',
-    website: 'www.punjabpesticides.com'
+    name: 'Pak Agro Pesticides & Seeds Wholesale Depot',
+    owner: 'Tariq Mahmood & Sons',
+    phone: '+92 300 1234567',
+    email: 'info@pakagroerp.pk',
+    address: 'Shop No. 45, Grain Market Road, Multan, Punjab, Pakistan',
+    website: 'www.pakagroerp.pk'
   };
 
   const shopInfo = getStoredData('AGRO_ERP_SHOP_INFO', defaultShopInfo);
